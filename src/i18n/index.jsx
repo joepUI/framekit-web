@@ -9,7 +9,13 @@ const I18nCtx = createContext(null)
 
 export function I18nProvider({ children }) {
   const [lang, setLang] = useState(() => {
-    try { return localStorage.getItem(STORAGE_KEY) || 'zh' } catch { return 'zh' }
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY)
+      if (saved) return saved
+      // 浏览器语言含 zh 则中文，否则英文
+      const browserLang = (navigator.language || '').toLowerCase()
+      return browserLang.startsWith('zh') ? 'zh' : 'en'
+    } catch { return 'en' }
   })
 
   const toggle = useCallback(() => {
@@ -33,7 +39,10 @@ export function I18nProvider({ children }) {
 }
 
 export function useI18n() {
-  return useContext(I18nCtx)
+  const ctx = useContext(I18nCtx)
+  // 防止在 I18nProvider 外部使用时崩溃
+  if (!ctx) return { lang: 'zh', t: (key) => key, toggle: () => {} }
+  return ctx
 }
 
 export function LangToggle({ className }) {

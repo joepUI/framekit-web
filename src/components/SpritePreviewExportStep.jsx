@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import JSZip from 'jszip'
 import Panel from './Panel.jsx'
 import { buildSheet } from '../utils/frameExtract.js'
 import { encodeGif } from '../utils/gifEncoder.js'
+import UPNG from 'upng-js'
 import { baseName } from '../utils/format.js'
 import { useToast } from './Toast.jsx'
 import { useI18n } from '../i18n/index.jsx'
@@ -14,6 +16,8 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
   const [animIdx, setAnimIdx] = useState(0)
   const [exporting, setExporting] = useState(false)
   const [exportGif, setExportGif] = useState(false)
+  const [exportZip, setExportZip] = useState(false)
+  const [exportApng, setExportApng] = useState(false)
   const animRef = useRef(null)
   const toast = useToast()
 
@@ -88,8 +92,9 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
       toast.success(t('sprite.pngDl'))
     } catch (e) {
       toast.error(t('sprite.exportFailed') + e.message)
+    } finally {
+      setExporting(false)
     }
-    setExporting(false)
   }
 
   // ── 导出动画 GIF ──
@@ -117,8 +122,73 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
       toast.success(t('sprite.gifDl'))
     } catch (e) {
       toast.error(t('sprite.gifFailed') + e.message)
+    } finally {
+      setExportGif(false)
     }
-    setExportGif(false)
+  }
+
+  // ── 导出单帧 ZIP ──
+  async function handleExportZip() {
+    if (!frames.length) return
+    setExportZip(true)
+    try {
+      const zip = new JSZip()
+      const name = baseName(sourceFile?.name || 'sprite')
+      for (let i = 0; i < frames.length; i++) {
+        const f = frames[i]
+        const c = document.createElement('canvas')
+        c.width = outW; c.height = outH
+        const src = document.createElement('canvas')
+        src.width = f.imageData.width; src.height = f.imageData.height
+        src.getContext('2d').putImageData(f.imageData, 0, 0)
+        c.getContext('2d').drawImage(src, 0, 0, outW, outH)
+        const blob = await new Promise(res => c.toBlob(res, 'image/png'))
+        if (!blob) throw new Error(`frame ${i + 1} toBlob failed`)
+        zip.file(`${name}-frame-${String(i + 1).padStart(3, '0')}.png`, blob)
+      }
+      const zipBlob = await zip.generateAsync({ type: 'blob' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(zipBlob)
+      a.download = `${baseName(sourceFile?.name || 'sprite')}-frames.zip`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000)
+      toast.success(t('sprite.zipDl'))
+    } catch (e) {
+      toast.error(t('sprite.zipFailed') + e.message)
+    } finally {
+      setExportZip(false)
+    }
+  }
+
+  // ── 导出 APNG ──
+  async function handleExportApng() {
+    if (!frames.length) return
+    setExportApng(true)
+    try {
+      const rgbaList = frames.map(f => {
+        const c = document.createElement('canvas')
+        c.width = outW; c.height = outH
+        const src = document.createElement('canvas')
+        src.width = f.imageData.width; src.height = f.imageData.height
+        src.getContext('2d').putImageData(f.imageData, 0, 0)
+        c.getContext('2d').drawImage(src, 0, 0, outW, outH)
+        return c.getContext('2d').getImageData(0, 0, outW, outH).data.buffer
+      })
+      const delay = Math.round(1000 / Math.max(previewFps, 1))
+      const delays = frames.map(() => delay)
+      const buf = UPNG.encode(rgbaList, outW, outH, 0, delays)
+      const blob = new Blob([buf], { type: 'image/png' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `${baseName(sourceFile?.name || 'sprite')}.apng`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000)
+      toast.success(t('sprite.apngDl'))
+    } catch (e) {
+      toast.error(t('sprite.apngFailed') + e.message)
+    } finally {
+      setExportApng(false)
+    }
   }
 
   const metaText = frames.length ? `${frames.length} ${t('common.frames')} · ${sheetW} × ${sheetH} px` : ''
@@ -215,7 +285,7 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
             </div>
           </div>
 
-          {/* 导出按钮（并排） */}
+          {/* 导出按钮 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <button
               className="btn btn-primary"
@@ -230,6 +300,20 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
               disabled={exportGif || !frames.length}
             >
               {exportGif ? t('common.exporting') : t('sprite.dlGif')}
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={handleExportZip}
+              disabled={exportZip || !frames.length}
+            >
+              {exportZip ? t('common.exporting') : t('sprite.dlZip')}
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={handleExportApng}
+              disabled={exportApng || !frames.length}
+            >
+              {exportApng ? t('common.exporting') : t('sprite.dlApng')}
             </button>
           </div>
 

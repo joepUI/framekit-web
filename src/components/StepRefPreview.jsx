@@ -268,10 +268,7 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
                       background: 'var(--surface2)', borderRadius: 'var(--radius-sm)',
                       border: '1px solid var(--border)',
                     }}>
-                      <div style={{
-                        width: 14, height: 14, borderRadius: 0, flexShrink: 0,
-                        background: state.chromaColor, border: '1px solid var(--border)',
-                      }} />
+                      <div className="color-dot" style={{ background: state.chromaColor }} />
                       <span className="chroma-rgb-text" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text)', fontFamily: 'monospace' }}>
                         {(() => { const rgb = hexToRgb(state.chromaColor); return `RGB(${rgb.r}, ${rgb.g}, ${rgb.b})` })()}
                       </span>

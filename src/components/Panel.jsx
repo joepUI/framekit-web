@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
+import { useI18n } from '../i18n/index.jsx'
 
 export default function Panel({ stepNum, title, done, locked, defaultOpen = false, children, metaText }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(defaultOpen)
   const prevLocked = useRef(locked)
   const prevDone = useRef(done)
@@ -46,7 +48,7 @@ export default function Panel({ stepNum, title, done, locked, defaultOpen = fals
         </span>
         <span className="panel-title">{title}</span>
         {metaText && <span className="panel-meta">{metaText}</span>}
-        {locked && <span className="panel-meta" style={{ color: 'var(--text-dim)', fontSize: '0.72rem' }}><i className="ri-lock-line" style={{ marginRight: 3 }} /> 请先完成上一步</span>}
+        {locked && <span className="panel-meta" style={{ color: 'var(--text-dim)', fontSize: '0.72rem' }}><i className="ri-lock-line" style={{ marginRight: 3 }} /> {t('common.completeFirst')}</span>}
         {canOpen && (
           <span className={`panel-chevron ${open ? 'open' : ''}`}><i className="ri-arrow-down-s-line" /></span>
         )}

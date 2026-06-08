@@ -25,7 +25,7 @@ function getBin(r, g, b) {
 
 // ─── 调色板构建 ───────────────────────────────────────────────────────────────
 
-function buildPalette(frames, width, height) {
+function buildPalette(frames, width, height, maxColors = MAX_COLORS) {
   // 统计颜色分箱
   const stats = new Array(BIN_COUNT)
   for (let i = 0; i < BIN_COUNT; i++) stats[i] = { count: 0, r: 0, g: 0, b: 0 }
@@ -51,7 +51,7 @@ function buildPalette(frames, width, height) {
     if (stats[i].count > 0) activeBins.push(i)
   }
   activeBins.sort((a, b) => stats[b].count - stats[a].count)
-  const picked = activeBins.slice(0, MAX_COLORS)
+  const picked = activeBins.slice(0, maxColors)
 
   // 构建调色板表
   const paletteSize = ceilPow2(Math.max(2, picked.length))
@@ -140,33 +140,63 @@ function lzwEncode(pixels, minCodeSize) {
     if (bitPos > 0) output.push(curByte)
   }
 
-  // 简化 LZW：每个像素独立编码（不做字典匹配，文件稍大但保证正确）
-  let codeSize = minCodeSize + 1
-  let dictSize = endCode + 1
-  let prevLiteral = false
-
-  writeBits(clearCode, codeSize)
-  dictSize = endCode + 1
-  codeSize = minCodeSize + 1
-  prevLiteral = false
-
-  for (let i = 0; i < pixels.length; i++) {
-    if (prevLiteral && dictSize > ((1 << 12) - 1)) {
-      writeBits(clearCode, codeSize)
-      codeSize = minCodeSize + 1
-      dictSize = endCode + 1
-      prevLiteral = false
-    }
-    writeBits(pixels[i], codeSize)
-    if (prevLiteral) {
-      dictSize++
-      if (dictSize === (1 << codeSize) && codeSize < 12) {
-        codeSize++
-      }
-    }
-    prevLiteral = true
+  // 完整字典匹配 LZW（GIF89a 规范，最大码字 12 位）
+  // 字典 key = "prefix_code,pixel"，value = 分配的码字
+  // 使用 Map 替代对象以获得更好的性能
+  function initDict() {
+    const dict = new Map()
+    // 初始字典：单像素字面量（clearCode 和 endCode 之后的槽位由编码过程填充）
+    return dict
   }
 
+  let codeSize = minCodeSize + 1
+  let nextCode = endCode + 1
+  let dict = initDict()
+
+  writeBits(clearCode, codeSize)
+
+  if (pixels.length === 0) {
+    writeBits(endCode, codeSize)
+    flush()
+    return new Uint8Array(output)
+  }
+
+  let prefix = pixels[0] // 当前匹配前缀（初始为第一个像素的字面码）
+
+  for (let i = 1; i < pixels.length; i++) {
+    const pixel = pixels[i]
+    // 用 prefix * 256 + pixel 作为 key（比字符串拼接快）
+    const key = prefix * 256 + pixel
+
+    if (dict.has(key)) {
+      // 前缀+当前像素在字典中，继续延伸
+      prefix = dict.get(key)
+    } else {
+      // 输出当前前缀对应的码字
+      writeBits(prefix, codeSize)
+
+      if (nextCode <= 0xfff) {
+        // 将新序列加入字典
+        dict.set(key, nextCode++)
+        // 码字位宽在字典大小超过当前上限时扩展
+        if (nextCode > (1 << codeSize) && codeSize < 12) {
+          codeSize++
+        }
+      } else {
+        // 字典已满（4096 项），发送 CLEAR 并重置
+        writeBits(clearCode, codeSize)
+        codeSize = minCodeSize + 1
+        nextCode = endCode + 1
+        dict = initDict()
+      }
+
+      // 新前缀从当前像素的字面码开始
+      prefix = pixel
+    }
+  }
+
+  // 输出最后一个前缀
+  writeBits(prefix, codeSize)
   writeBits(endCode, codeSize)
   flush()
 
@@ -192,9 +222,10 @@ function writeSubBlocks(bytes, data) {
  * @param {number} width - 帧宽
  * @param {number} height - 帧高
  * @param {number} fps - 帧率
+ * @param {number} [maxColors=256] - 调色板最大颜色数（2-256），数值越小文件越小
  * @returns {Uint8Array}
  */
-export function encodeGif(frames, width, height, fps) {
+export function encodeGif(frames, width, height, fps, maxColors = 256) {
   const delayCs = clamp(Math.round(100 / fps), 1, 65535)
   const bytes = []
 
@@ -211,7 +242,7 @@ export function encodeGif(frames, width, height, fps) {
   }
 
   // 构建全局调色板（透明时预留索引 0 给透明色）
-  const palette = buildPalette(frames, width, height)
+  const palette = buildPalette(frames, width, height, maxColors)
   const transparentIndex = hasAlpha ? palette.paletteSize - 1 : null
 
   const tableBitSize = Math.max(1, Math.ceil(Math.log2(Math.max(2, palette.paletteSize))))

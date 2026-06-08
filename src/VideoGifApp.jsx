@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import Panel from './components/Panel.jsx'
 import NumStepper from './components/NumStepper.jsx'
 import StepCropComponent from './components/StepCrop.jsx'
-import { fmtTime, fmtSize, baseName, rgbToHex, hexToRgb } from './utils/format.js'
+import { fmtTime, fmtSize, baseName, rgbToHex, hexToRgb, estimateMemory } from './utils/format.js'
 import { extractFrame } from './utils/frameExtract.js'
 import { applyChroma } from './utils/chroma.js'
 import { encodeGif } from './utils/gifEncoder.js'
@@ -84,17 +84,14 @@ export default function VideoGifApp({ onBack }) {
   const outH = selectedSize?.h || state.cropRect?.h || state.videoHeight || 1
 
   return (
-    <div className="app">
-      <header className="app-toolbar">
-        {onBack && (
-          <button className="btn btn-ghost" onClick={onBack}>
-            <i className="ri-arrow-left-s-line" /> {t('common.home')}
-          </button>
-        )}
-        <h1 className="toolbar-title">{t('tool03.title')}</h1>
-        <span className="toolbar-badge">{t('common.free')}</span>
-      </header>
-
+    <>
+      <nav className="tut-nav">
+        <button className="tut-back-btn" onClick={onBack}>
+          <i className="ri-arrow-left-line" /> {t('common.home')}
+        </button>
+        <span className="tut-nav-title">{t('tool03.title')}</span>
+      </nav>
+      <div className="app">
       {/* Step 1: 上传视频 */}
       <StepUploadVideo state={state} update={update} step1Done={step1Done} />
 
@@ -111,6 +108,7 @@ export default function VideoGifApp({ onBack }) {
       {/* Step 5: 生成 & 下载 */}
       <StepGenerate state={state} update={update} step2Done={step2Done} outW={outW} outH={outH} />
     </div>
+    </>
   )
 }
 
@@ -227,17 +225,19 @@ function StepChroma({ state, update, step2Done }) {
       update({ refFrame: ctx.getImageData(0, 0, outW, outH) })
     }, { once: true })
     return () => { alive = false; video.src = ''; video.load() }
-  }, [state.videoUrl, state.cropRect, step2Done])
+  }, [state.videoUrl, state.cropRect, state.segStart, step2Done, outW, outH, update])
 
   // 绘制原图
-  if (origCanvas && state.refFrame) {
+  useEffect(() => {
+    if (!origCanvas || !state.refFrame) return
     origCanvas.width = state.refFrame.width
     origCanvas.height = state.refFrame.height
     origCanvas.getContext('2d').putImageData(state.refFrame, 0, 0)
-  }
+  }, [origCanvas, state.refFrame])
 
   // 绘制预览
-  if (previewCanvas && state.refFrame) {
+  useEffect(() => {
+    if (!previewCanvas || !state.refFrame) return
     const { width: w, height: h, data } = state.refFrame
     previewCanvas.width = w; previewCanvas.height = h
     const ctx = previewCanvas.getContext('2d')
@@ -260,7 +260,7 @@ function StepChroma({ state, update, step2Done }) {
         ctx.clearRect(0, 0, w, h); ctx.putImageData(copy, 0, 0)
       }
     }
-  }
+  }, [previewCanvas, state.refFrame, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth, previewMode, solidBgColor])
 
   function pickColor(e) {
     if (!state.refFrame || !origCanvas) return
@@ -277,7 +277,7 @@ function StepChroma({ state, update, step2Done }) {
     <Panel stepNum={3} title={t('gif.stepChroma')} done={hasColor} locked={!step2Done} defaultOpen={false}
       metaText={hasColor ? state.chromaColor : t('gif.skipable')}>
 
-      <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+      <p className="step-hint">
         {t('gif.chromaHint')}
       </p>
 
@@ -285,17 +285,17 @@ function StepChroma({ state, update, step2Done }) {
         <div className="grid-2col" style={{ display: 'grid', gap: 14 }}>
           {/* 左：原图取色 */}
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div className="row-between" style={{ marginBottom: 8 }}>
               <div>
                 <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>{t('gif.refFrame')}</span>
-                <div style={{ fontSize: '0.72rem', color: 'var(--accent)', marginTop: 2 }}>
+                <div className="sub-accent">
                   {hasColor ? t('gif.colorPicked') : t('gif.clickOptional')}
                 </div>
               </div>
               {hasColor && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 10px', height: 35, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
-                    <div style={{ width: 14, height: 14, background: state.chromaColor, border: '1px solid var(--border)' }} />
+                    <div className="color-dot" style={{ background: state.chromaColor }} />
                     <span className="chroma-rgb-text" style={{ fontSize: '0.75rem', fontWeight: 600, fontFamily: 'monospace' }}>
                       {(() => { const rgb = hexToRgb(state.chromaColor); return `RGB(${rgb.r}, ${rgb.g}, ${rgb.b})` })()}
                     </span>
@@ -305,7 +305,7 @@ function StepChroma({ state, update, step2Done }) {
               )}
             </div>
             <div style={{ position: 'relative', border: '1px solid var(--border)', background: '#000' }}>
-              <canvas ref={setOrigCanvas} onClick={pickColor} style={{ width: '100%', display: 'block', cursor: 'crosshair' }} />
+              <canvas ref={setOrigCanvas} onClick={pickColor} className="canvas-crosshair" />
               {!hasColor && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)', pointerEvents: 'none' }}>
                   <div style={{ background: 'rgba(255,255,255,0.92)', padding: '14px 20px', textAlign: 'center' }}>
@@ -319,7 +319,7 @@ function StepChroma({ state, update, step2Done }) {
 
           {/* 右：预览 */}
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div className="row-between" style={{ marginBottom: 8 }}>
               <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>{t('gif.effectPreview')}</span>
               <div className="segmented-control" style={{ height: 35 }}>
                 {[{ key: 'result', label: t('gif.modeResult') }, { key: 'alpha', label: t('gif.modeAlpha') }, { key: 'solid', label: t('gif.modeSolid') }].map(m => (
@@ -337,12 +337,11 @@ function StepChroma({ state, update, step2Done }) {
               <canvas ref={setPreviewCanvas} style={{ width: '100%', display: 'block' }} />
             </div>
             {previewMode === 'solid' && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 6 }}>
+              <div className="solid-color-row">
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{t('gif.checkColor')}</span>
-                <label style={{ position: 'relative', width: 18, height: 18, display: 'inline-block', cursor: 'pointer' }}>
+                <label className="color-picker-wrap">
                   <div style={{ width: 18, height: 18, background: solidBgColor, border: '1px solid var(--border)' }} />
-                  <input type="color" value={solidBgColor} onChange={e => setSolidBgColor(e.target.value)}
-                    style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }} />
+                  <input type="color" value={solidBgColor} onChange={e => setSolidBgColor(e.target.value)} />
                 </label>
               </div>
             )}
@@ -419,7 +418,7 @@ function StepParamsPreview({ state, update, step2Done, outW, outH, sizePresets }
       previewCanvas.getContext('2d').putImageData(id, 0, 0)
     }, { once: true })
     return () => { alive = false; video.src = ''; video.load() }
-  }, [previewCanvas, currentTime, state.chromaColor, state.tolerance, state.smooth, state.despill, step2Done])
+  }, [previewCanvas, currentTime, state.videoUrl, state.cropRect, outW, outH, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth, step2Done])
 
   return (
     <Panel stepNum={4} title={t('gif.stepParams')} done={false} locked={!step2Done} defaultOpen={true}
@@ -557,6 +556,7 @@ function StepGenerate({ state, update, step2Done, outW, outH }) {
   const segLen = end - start
   const fps = state.fps || 12
   const estimatedFrames = Math.max(1, Math.round(segLen * fps))
+  const memInfo = estimateMemory(estimatedFrames, outW, outH)
 
   // gifUrl 变化或组件卸载时释放旧的 ObjectURL
   useEffect(() => {
@@ -628,9 +628,19 @@ function StepGenerate({ state, update, step2Done, outW, outH }) {
     <Panel stepNum={5} title={t('gif.stepGenerate')} done={!!gifUrl} locked={!step2Done} defaultOpen={false}
       metaText={gifUrl ? fmtSize(gifSize) : ''}>
 
-      <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+      <p className="step-hint">
         {t('gif.genHint')}
       </p>
+
+      {/* 内存警告 */}
+      {memInfo.level !== 'ok' && (
+        <div className={`status-msg ${memInfo.level === 'danger' ? 'error' : 'warning'}`} style={{ marginTop: 0, marginBottom: 12 }}>
+          <i className={`ri-${memInfo.level === 'danger' ? 'error-warning' : 'alert'}-line`} />
+          {memInfo.level === 'danger'
+            ? t('extract.memDanger').replace('{mem}', memInfo.label)
+            : t('extract.memWarn').replace('{mem}', memInfo.label)}
+        </div>
+      )}
 
       {/* 生成按钮 */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>

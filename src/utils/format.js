@@ -31,3 +31,20 @@ export function hexToRgb(hex) {
 export function rgbToHex(r, g, b) {
   return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')
 }
+
+/**
+ * 估算帧提取内存用量
+ * @param {number} frameCount 帧数
+ * @param {number} w 帧宽
+ * @param {number} h 帧高
+ * @returns {{ bytes: number, label: string, level: 'ok'|'warn'|'danger' }}
+ */
+export function estimateMemory(frameCount, w, h) {
+  const bytes = frameCount * w * h * 4 // RGBA
+  const mb = bytes / 1024 / 1024
+  const label = mb >= 1024
+    ? `~${(mb / 1024).toFixed(1)} GB`
+    : `~${Math.round(mb)} MB`
+  const level = mb > 800 ? 'danger' : mb > 200 ? 'warn' : 'ok'
+  return { bytes, mb, label, level }
+}

@@ -15,11 +15,22 @@ export default function SpriteEditStep({ stepNum, locked, state, update }) {
   const dragIdx = useRef(null)
   const [dropTarget, setDropTarget] = useState(null) // 拖拽插入指示线位置
 
-  // 缩略图 dataURL
-  const thumbUrls = useMemo(
-    () => frames.map(f => imageDataToUrl(f.imageData)),
-    [frames]
-  )
+  // 缩略图 dataURL — 增量缓存，只对新帧/变化帧生成，其余复用
+  const urlCacheRef = useRef(new Map()) // Map<ImageData, string>
+  const thumbUrls = useMemo(() => {
+    const cache = urlCacheRef.current
+    // 清理不再使用的帧缓存，避免内存泄漏
+    const activeSet = new Set(frames.map(f => f.imageData))
+    for (const key of cache.keys()) {
+      if (!activeSet.has(key)) cache.delete(key)
+    }
+    return frames.map(f => {
+      if (!cache.has(f.imageData)) {
+        cache.set(f.imageData, imageDataToUrl(f.imageData))
+      }
+      return cache.get(f.imageData)
+    })
+  }, [frames])
 
   // ── 编辑前推 undo 历史 ──
   function applyEdit(newFrames, newSelectedIndex) {
@@ -189,7 +200,7 @@ export default function SpriteEditStep({ stepNum, locked, state, update }) {
               }} />}
               <img
                 src={url}
-                alt={`帧 ${idx + 1}`}
+                alt={t('common.frameAlt').replace('{n}', idx + 1)}
                 style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
                 draggable={false}
               />

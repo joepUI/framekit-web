@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import Panel from './Panel.jsx'
 import NumStepper from './NumStepper.jsx'
-import { fmtTime } from '../utils/format.js'
+import { fmtTime, estimateMemory } from '../utils/format.js'
 import { extractFrame } from '../utils/frameExtract.js'
 import { useToast } from './Toast.jsx'
 import { useI18n } from '../i18n/index.jsx'
@@ -20,8 +20,12 @@ export default function StepSegment({ stepNum, done, locked, state, update }) {
   const segLen = end - start
   const fps = state.fps || 8
 
-  // 预计帧数
+  // 预计帧数 + 内存估算
   const estimatedFrames = Math.max(1, Math.round(segLen * fps))
+  const crop = state.cropRect
+  const outW = crop?.w || state.videoWidth || 1920
+  const outH = crop?.h || state.videoHeight || 1080
+  const memInfo = estimateMemory(estimatedFrames, outW, outH)
 
   // 提取全部帧
   async function extractFrames() {
@@ -40,10 +44,6 @@ export default function StepSegment({ stepNum, done, locked, state, update }) {
         video.onerror = rej
         video.load()
       })
-
-      const crop = state.cropRect
-      const outW = crop?.w || state.videoWidth
-      const outH = crop?.h || state.videoHeight
 
       // 按 FPS 均匀抽帧
       const total = estimatedFrames
@@ -146,6 +146,9 @@ export default function StepSegment({ stepNum, done, locked, state, update }) {
             <span>{estimatedFrames} {t('common.frames')}</span>
             <span className="metric-sub" style={{ marginTop: 0 }}>· {segLen.toFixed(1)} {t('extract.segSec')}</span>
           </div>
+          <div style={{ fontSize: 'var(--text-xs)', marginTop: 4, color: memInfo.level === 'danger' ? 'var(--error)' : memInfo.level === 'warn' ? '#b87a10' : 'var(--text-dim)' }}>
+            {t('extract.memEst')} {memInfo.label}
+          </div>
         </div>
 
         {/* Row 2 / 右：开始 / 结束 / 片段长度 */}
@@ -166,6 +169,16 @@ export default function StepSegment({ stepNum, done, locked, state, update }) {
           </div>
         </div>
       </div>
+
+      {/* 内存警告 */}
+      {memInfo.level !== 'ok' && (
+        <div className={`status-msg ${memInfo.level === 'danger' ? 'error' : 'warning'}`} style={{ marginTop: 12 }}>
+          <i className={`ri-${memInfo.level === 'danger' ? 'error-warning' : 'alert'}-line`} />
+          {memInfo.level === 'danger'
+            ? t('extract.memDanger').replace('{mem}', memInfo.label)
+            : t('extract.memWarn').replace('{mem}', memInfo.label)}
+        </div>
+      )}
 
       {/* 提取按钮 + 进度 */}
       <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>

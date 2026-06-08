@@ -80,34 +80,6 @@ button, a, [role="button"] { cursor: pointer; }
   margin: 0 auto;
   padding: var(--sp-6) var(--sp-4) 60px;
 }
-.app-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: 0 0 var(--sp-5);
-  margin-bottom: var(--sp-4);
-  position: relative;
-}
-.toolbar-title {
-  font-size: var(--text-md);
-  font-weight: var(--fw-semi);
-  letter-spacing: -0.01em;
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-}
-.toolbar-badge {
-  margin-left: auto;
-  font-size: var(--text-xs);
-  white-space: nowrap;
-  background: rgba(90, 158, 90, 0.08);
-  border: 1px solid rgba(90, 158, 90, 0.2);
-  padding: 2px 10px;
-  border-radius: 0px;
-  color: #3a7a3a;
-  font-weight: var(--fw-medium);
-}
-
 /* ── Panel / Card ── */
 .panel {
   background: var(--surface);
@@ -319,6 +291,7 @@ button { font-family: inherit; cursor: pointer; transition: all 0.18s var(--ease
 .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border-soft); }
 .btn-ghost:hover { color: var(--text); border-color: var(--border); background: oklch(96% 0.008 72); }
 
+
 .btn-danger { background: var(--error); color: #fff; border: none; }
 .btn-danger:hover { filter: brightness(1.08); transform: translateY(-1px); }
 
@@ -442,3 +415,113 @@ button { font-family: inherit; cursor: pointer; transition: all 0.18s var(--ease
 .toast-error   { --toast-color: var(--error); }
 .toast-warning { --toast-color: var(--warning); }
 .toast-info    { --toast-color: var(--accent); }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── 提取自内联样式的工具类 ── */
+
+/* 步骤说明文字 */
+.step-hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin-bottom: var(--sp-4);
+  line-height: var(--lh-normal);
+}
+
+/* 左右两端对齐 flex 行 */
+.row-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* 取色色块 */
+.color-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+
+/* canvas 全宽 + 十字光标 */
+.canvas-crosshair {
+  width: 100%;
+  display: block;
+  cursor: crosshair;
+}
+
+/* 纯色底检查行（右对齐） */
+.solid-color-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: 6px;
+}
+
+/* 颜色选择器 label 容器 */
+.color-picker-wrap {
+  position: relative;
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+.color-picker-wrap input[type=color] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+/* 副标题（橙色小字） */
+.sub-accent {
+  font-size: var(--text-xs);
+  color: var(--accent);
+  margin-top: 2px;
+}
+
+/* ── Tool page shared nav（BgRemoveApp / VideoGifApp 等共用）── */
+.tut-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 60px;
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 100;
+}
+.tut-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: 20px;
+  padding: 5px 14px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.tut-back-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tut-nav-title {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+@media (max-width: 600px) {
+  .tut-nav { padding: 14px 20px; }
+}

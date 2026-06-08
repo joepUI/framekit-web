@@ -397,6 +397,7 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
                 <option value="128">128 × 128</option>
                 <option value="256">256 × 256</option>
                 <option value="512">512 × 512</option>
+                <option value="1024">1024 × 1024</option>
               </select>
               <i className="ri-arrow-down-s-line" style={{
                 position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',

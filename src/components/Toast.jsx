@@ -14,7 +14,7 @@ export function ToastProvider({ children }) {
   const add = useCallback((message, type) => {
     const id = ++_id
     setToasts(prev => [...prev, { id, message, type }])
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000)
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 2000)
   }, [])
 
   const toast = {

@@ -61,7 +61,7 @@ export default function App({ onBack }) {
     if (!prev || prev === state.cropRect) return
     // 裁剪改了，只清除序列图数据 → 步骤4需要重新生成，步骤5收起
     update({ sheetCanvas: null, sheetAlphaCanvas: null })
-  }, [state.cropRect])
+  }, [state.cropRect, update])
 
   // 步骤4参数变化时，已生成的序列图失效 → 步骤5收起
   const step4Key = `${state.chromaColor}-${state.tolerance}-${state.smooth}-${state.despill}-${state.edgeSmooth}`
@@ -73,7 +73,7 @@ export default function App({ onBack }) {
     if (state.sheetCanvas) {
       update({ sheetCanvas: null, sheetAlphaCanvas: null })
     }
-  }, [step4Key])
+  }, [step4Key, update])
 
   // 步骤完成状态
   const step1Done = !!state.videoFile
@@ -83,22 +83,20 @@ export default function App({ onBack }) {
   const step5Done = !!state.sheetCanvas
 
   return (
-    <div className="app">
-      <header className="app-toolbar">
-        {onBack && (
-          <button className="btn btn-ghost" onClick={onBack}>
-            <i className="ri-arrow-left-s-line" /> {t('common.home')}
-          </button>
-        )}
-        <h1 className="toolbar-title">{t('tool01.title')}</h1>
-        <span className="toolbar-badge">{t('common.free')}</span>
-      </header>
-
+    <>
+      <nav className="tut-nav">
+        <button className="tut-back-btn" onClick={onBack}>
+          <i className="ri-arrow-left-line" /> {t('common.home')}
+        </button>
+        <span className="tut-nav-title">{t('tool01.title')}</span>
+      </nav>
+      <div className="app">
       <StepUpload stepNum={1} done={step1Done} state={state} update={update} />
       <StepCrop stepNum={2} done={step2Done} locked={!step1Done} state={state} update={update} />
       <StepSegment stepNum={3} done={step3Done} locked={!step2Done} state={state} update={update} />
       <StepRefPreview stepNum={4} done={step4Done} locked={!step3Done} state={state} update={update} />
       <StepPreviewExport stepNum={5} done={step5Done} locked={!step4Done} state={state} update={update} />
     </div>
+    </>
   )
 }

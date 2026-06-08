@@ -39,17 +39,14 @@ export default function SpriteEditorApp({ onBack }) {
   const step1Done = state.frames.length > 0
 
   return (
-    <div className="app">
-      <header className="app-toolbar">
-        {onBack && (
-          <button className="btn btn-ghost" onClick={onBack}>
-            <i className="ri-arrow-left-s-line" /> {t('common.home')}
-          </button>
-        )}
-        <h1 className="toolbar-title">{t('tool04.title')}</h1>
-        <span className="toolbar-badge">{t('common.free')}</span>
-      </header>
-
+    <>
+      <nav className="tut-nav">
+        <button className="tut-back-btn" onClick={onBack}>
+          <i className="ri-arrow-left-line" /> {t('common.home')}
+        </button>
+        <span className="tut-nav-title">{t('tool04.title')}</span>
+      </nav>
+      <div className="app">
       <SpriteUploadStep
         stepNum={1}
         done={step1Done}
@@ -69,5 +66,6 @@ export default function SpriteEditorApp({ onBack }) {
         update={update}
       />
     </div>
+    </>
   )
 }

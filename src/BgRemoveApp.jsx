@@ -148,17 +148,14 @@ export default function BgRemoveApp({ onBack }) {
   const step2Done = !!chromaColor
 
   return (
-    <div className="app">
-      <header className="app-toolbar">
-        {onBack && (
-          <button className="btn btn-ghost" onClick={onBack}>
-            <i className="ri-arrow-left-s-line" /> {t('common.home')}
-          </button>
-        )}
-        <h1 className="toolbar-title">{t('tool02.title')}</h1>
-        <span className="toolbar-badge">{t('common.free')}</span>
-      </header>
-
+    <>
+      <nav className="tut-nav">
+        <button className="tut-back-btn" onClick={onBack}>
+          <i className="ri-arrow-left-line" /> {t('common.home')}
+        </button>
+        <span className="tut-nav-title">{t('tool02.title')}</span>
+      </nav>
+      <div className="app">
       {/* ── Step 1: 上传图片 ── */}
       <Panel stepNum={1} title={t('bg.stepUpload')} done={step1Done} defaultOpen={true} metaText={step1Done ? file.name : ''}>
         {!step1Done ? (
@@ -217,7 +214,7 @@ export default function BgRemoveApp({ onBack }) {
       <Panel stepNum={2} title={t('bg.stepChroma')} done={step2Done} locked={!step1Done} defaultOpen={false}
         metaText={step2Done ? `${chromaColor}` : ''}
       >
-        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+        <p className="step-hint">
           {t('bg.chromaHint')}
         </p>
 
@@ -225,10 +222,10 @@ export default function BgRemoveApp({ onBack }) {
           <div className="grid-2col" style={{ display: 'grid', gap: 14 }}>
             {/* 左栏：原图 */}
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div className="row-between" style={{ marginBottom: 8 }}>
                 <div>
                   <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>{t('bg.original')}</span>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--accent)', marginTop: 2 }}>
+                  <div className="sub-accent">
                     {chromaColor ? t('bg.colorPicked') : t('bg.clickSample')}
                   </div>
                 </div>
@@ -240,10 +237,7 @@ export default function BgRemoveApp({ onBack }) {
                       background: 'var(--surface2)', borderRadius: 'var(--radius-sm)',
                       border: '1px solid var(--border)',
                     }}>
-                      <div style={{
-                        width: 14, height: 14, borderRadius: 0, flexShrink: 0,
-                        background: chromaColor, border: '1px solid var(--border)',
-                      }} />
+                      <div className="color-dot" style={{ background: chromaColor }} />
                       <span className="chroma-rgb-text" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text)', fontFamily: 'monospace' }}>
                         {(() => { const rgb = hexToRgb(chromaColor); return `RGB(${rgb.r}, ${rgb.g}, ${rgb.b})` })()}
                       </span>
@@ -258,7 +252,7 @@ export default function BgRemoveApp({ onBack }) {
                 position: 'relative', borderRadius: 'var(--radius-sm)', overflow: 'hidden',
                 border: '1px solid var(--border)', background: '#000',
               }}>
-                <canvas ref={setOrigCanvas} onClick={pickColor} style={{ width: '100%', display: 'block', cursor: 'crosshair' }} />
+                <canvas ref={setOrigCanvas} onClick={pickColor} className="canvas-crosshair" />
                 {!chromaColor && (
                   <div style={{
                     position: 'absolute', inset: 0,
@@ -279,7 +273,7 @@ export default function BgRemoveApp({ onBack }) {
 
             {/* 右栏：预览 */}
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div className="row-between" style={{ marginBottom: 8 }}>
                 <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>{t('bg.previewTitle')}</span>
                 <div className="segmented-control" style={{ height: 35 }}>
                   {[
@@ -307,13 +301,11 @@ export default function BgRemoveApp({ onBack }) {
                 <canvas ref={setPreviewCanvas} style={{ width: '100%', display: 'block' }} />
               </div>
               {previewMode === 'solid' && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                <div className="solid-color-row">
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{t('ref.checkColor')}</span>
-                  <label style={{ position: 'relative', display: 'inline-block', width: 18, height: 18, cursor: 'pointer' }}>
+                  <label className="color-picker-wrap">
                     <div style={{ width: 18, height: 18, background: solidBgColor, border: '1px solid var(--border)' }} />
-                    <input type="color" value={solidBgColor} onChange={e => setSolidBgColor(e.target.value)}
-                      style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
-                    />
+                    <input type="color" value={solidBgColor} onChange={e => setSolidBgColor(e.target.value)} />
                   </label>
                   <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'var(--text)' }}>{solidBgColor.toUpperCase()}</span>
                 </div>
@@ -340,7 +332,7 @@ export default function BgRemoveApp({ onBack }) {
       <Panel stepNum={3} title={t('bg.stepExport')} done={false} locked={!step2Done} defaultOpen={false}
         metaText={step2Done ? `${imgW}×${imgH}` : ''}
       >
-        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+        <p className="step-hint">
           {t('bg.exportHint')}
         </p>
         <button className="btn btn-primary" onClick={downloadPng}>
@@ -348,5 +340,6 @@ export default function BgRemoveApp({ onBack }) {
         </button>
       </Panel>
     </div>
+    </>
   )
 }

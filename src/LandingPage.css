@@ -1,10 +1,11 @@
 /* ── Landing page color tokens (warm / cream theme) ── */
 @font-face {
   font-family: 'PangPang';
-  src: url('/PangPangZhuRouTi-2-en.otf') format('opentype');
+  src: url('/PangPangZhuRouTi-2-en.woff2') format('woff2'),
+       url('/PangPangZhuRouTi-2-en.otf') format('opentype');
   font-weight: normal;
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
 }
 
 .landing {
@@ -26,6 +27,7 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Helvetica Neue', sans-serif;
   cursor: url('/shubiao_small.png') 3 3, auto;
 }
+.landing *,
 .landing button,
 .landing a {
   cursor: url('/shubiao_small.png') 3 3, pointer;
@@ -101,26 +103,34 @@
   color: var(--accent, #e8911a);
 }
 .landing-lang-toggle {
-  margin-left: 8px;
+  width: 28px;
+  height: 28px;
+  min-width: unset;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
-.landing-nav-donate {
+.landing-github-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 5px 14px;
-  border-radius: 12px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  color: var(--lp-accent);
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  font-size: 1.1rem;
+  color: var(--text-muted, #7a5c30);
   background: transparent;
-  border: 1px solid rgba(232, 145, 26, 0.25);
-  transition: background 0.2s, border-color 0.2s;
+  border: 1px solid var(--border, #f0dfc0);
+  border-radius: 50%;
+  text-decoration: none;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
-.landing-nav-donate:hover {
-  background: rgba(232, 145, 26, 0.18);
-  border-color: var(--lp-accent);
+.landing-github-btn:hover {
+  color: var(--accent, #e8911a);
+  background: var(--accent-soft, rgba(232,145,26,0.1));
+  border-color: var(--accent, #e8911a);
 }
 
 /* ── Hero (compact) ── */
@@ -207,9 +217,8 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 13px 28px;
-  width: auto;
-  flex: 1;
+  padding: 13px 0;
+  width: 260px;
   border-radius: 0;
   font-size: 0.95rem;
   font-weight: 600;
@@ -222,27 +231,6 @@
 }
 .landing-cta:hover {
   background: var(--lp-accent-h);
-}
-
-.landing-donate-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 13px 28px;
-  border-radius: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  color: #E8911A;
-  background: rgba(232, 145, 26, 0.08);
-  border: none;
-  margin-top: 0;
-  flex: 1;
-  transition: background 0.2s;
-}
-.landing-donate-btn:hover {
-  background: rgba(232, 145, 26, 0.15);
 }
 
 /* ── Hamster card ── */
@@ -428,6 +416,14 @@
 .landing-footer-brand span {
   color: var(--lp-accent);
 }
+.landing-footer-link {
+  color: var(--lp-dim);
+  text-decoration: underline;
+  transition: color 0.15s;
+}
+.landing-footer-link:hover {
+  color: var(--lp-accent);
+}
 
 /* ── Responsive ── */
 @media (max-width: 800px) {
@@ -487,9 +483,6 @@
   .tools-sub { left: 24px; }
   .tool-card { padding: 28px 24px; }
 }
-
-/* ── Sponsor Payment 挂载容器：隐藏组件自带 trigger，overlay/toast 不受影响 ── */
-.sponsor-mount .sp-trigger { display: none; }
 
 /* ── 手机端提示弹窗 ── */
 .mobile-tip-overlay {
