@@ -8,6 +8,8 @@ import { encodeGif } from './utils/gifEncoder.js'
 import UPNG from 'upng-js'
 import JSZip from 'jszip'
 import { encodeAnimation as webpEncodeAnimation, decodeAnimation as webpDecodeAnimation } from 'wasm-webp'
+import { getPngCompressEnabled, setPngCompressEnabled } from './utils/pngOptimize.js'
+import PngCompressToggle from './components/PngCompressToggle.jsx'
 
 // ── 格式常量 ──
 const FMT = { PNG_SEQ: 'png-seq', APNG: 'apng', GIF: 'gif', AWEBP: 'awebp' }
@@ -149,7 +151,8 @@ function encodeGifData(frames, outW, outH, quality, fps) {
 }
 
 // ── PNG 序列打包为 ZIP ──
-async function encodePngZip(frames, outW, outH) {
+async function encodePngZip(frames, outW, outH, compress, onProgress) {
+  const { optimizePng } = await import('./utils/pngOptimize.js')
   const zip = new JSZip()
   const padLen = String(frames.length).length
   for (let i = 0; i < frames.length; i++) {
@@ -157,8 +160,12 @@ async function encodePngZip(frames, outW, outH) {
     const c = document.createElement('canvas')
     c.width = outW; c.height = outH
     c.getContext('2d').putImageData(resized, 0, 0)
-    const blob = await new Promise(r => c.toBlob(r, 'image/png'))
+    let blob = await new Promise(r => c.toBlob(r, 'image/png'))
     if (!blob) throw new Error(`帧 ${i + 1} 编码失败`)
+    if (compress) {
+      onProgress?.(i + 1, frames.length)
+      blob = await optimizePng(blob)
+    }
     zip.file(`${String(i + 1).padStart(padLen, '0')}.png`, blob)
   }
   return zip.generateAsync({ type: 'blob' })
@@ -207,6 +214,9 @@ export default function FormatConverterApp({ onBack }) {
 
   // ── Step 3 状态 ──
   const [exporting, setExporting] = useState(null)
+  const [exportProgress, setExportProgress] = useState('')
+  const [pngCompress, _setPngCompress] = useState(getPngCompressEnabled)
+  function togglePngCompress(v) { _setPngCompress(v); setPngCompressEnabled(v) }
 
   const step1Done = frames.length > 0
   const step2Done = step1Done
@@ -462,14 +472,18 @@ export default function FormatConverterApp({ onBack }) {
 
   async function exportPngZip() {
     setExporting('png')
+    setExportProgress('')
     try {
-      const blob = await encodePngZip(frames, outW, outH)
+      const blob = await encodePngZip(frames, outW, outH, pngCompress, (cur, tot) => {
+        setExportProgress(t('png.compressing').replace('{current}', cur).replace('{total}', tot))
+      })
       downloadBlob(blob, `png-${sourceName}.zip`)
       toast.success(t('conv.exportOk').replace('{format}', 'PNG ZIP'))
     } catch (err) {
       toast.error(t('conv.exportFailed') + ' ' + err.message)
     } finally {
       setExporting(null)
+      setExportProgress('')
     }
   }
 
@@ -535,7 +549,7 @@ export default function FormatConverterApp({ onBack }) {
               </div>
               <p className="upload-hint">{t('conv.uploadHint')}</p>
               {loading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, color: 'var(--text-dim)', fontSize: '0.85rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, color: 'var(--text-dim)', fontSize: 'var(--text-base)' }}>
                   <i className="ri-loader-4-line" style={{ animation: 'spin 1s linear infinite' }} />
                   {loadingMsg}
                 </div>
@@ -552,8 +566,8 @@ export default function FormatConverterApp({ onBack }) {
                 {thumbUrl && <img src={thumbUrl} alt="preview" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />}
               </div>
               <div>
-                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text)' }}>{sourceName}</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginTop: 4 }}>
+                <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text)' }}>{sourceName}</div>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', marginTop: 4 }}>
                   {FMT_LABELS[sourceFormat]} · {frames.length} {t('common.frames')} · {frameW}×{frameH}
                 </div>
                 <button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={resetAll}>
@@ -572,8 +586,8 @@ export default function FormatConverterApp({ onBack }) {
             {/* 左栏：动画预览 */}
             <div>
               <div className="row-between" style={{ marginBottom: 8 }}>
-                <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>{t('conv.preview')}</span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                <span style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text)' }}>{t('conv.preview')}</span>
+                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
                   {t('export.frame').replace('{current}', previewIdx + 1).replace('{total}', frames.length)}
                 </span>
               </div>
@@ -596,14 +610,14 @@ export default function FormatConverterApp({ onBack }) {
             <div>
               {/* 输出尺寸 */}
               <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>
+                <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>
                   {t('conv.outputSize')}
                 </label>
                 <select
                   value={sizePreset}
                   onChange={e => setSizePreset(e.target.value)}
                   style={{
-                    width: '100%', height: 36, fontSize: '0.82rem',
+                    width: '100%', height: 36, fontSize: 'var(--text-sm)',
                     background: 'var(--surface2)', color: 'var(--text)',
                     border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
                     padding: '0 10px', cursor: 'pointer',
@@ -615,27 +629,27 @@ export default function FormatConverterApp({ onBack }) {
 
               {/* FPS */}
               <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>
+                <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>
                   FPS
                 </label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <input type="range" min={1} max={30} value={fps} onChange={e => setFps(Number(e.target.value))}
                     style={{ flex: 1 }} />
-                  <span style={{ fontSize: '0.82rem', fontFamily: 'monospace', color: 'var(--text)', minWidth: 28, textAlign: 'right' }}>{fps}</span>
+                  <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'monospace', color: 'var(--text)', minWidth: 28, textAlign: 'right' }}>{fps}</span>
                 </div>
               </div>
 
               {/* 压缩质量 */}
               <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>
+                <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>
                   {t('conv.quality')} <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(0-100)</span>
                 </label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <input type="range" min={0} max={100} value={quality} onChange={e => setQuality(Number(e.target.value))}
                     style={{ flex: 1 }} />
-                  <span style={{ fontSize: '0.82rem', fontFamily: 'monospace', color: 'var(--text)', minWidth: 28, textAlign: 'right' }}>{quality}</span>
+                  <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'monospace', color: 'var(--text)', minWidth: 28, textAlign: 'right' }}>{quality}</span>
                 </div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 4 }}>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', marginTop: 4 }}>
                   {t('conv.qualityHint')}
                 </div>
               </div>
@@ -645,12 +659,12 @@ export default function FormatConverterApp({ onBack }) {
                 padding: '12px 14px', borderRadius: 'var(--radius-sm)',
                 background: 'var(--surface2)', border: '1px solid var(--border)',
               }}>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: 4 }}>{t('conv.sourceInfo')}</div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text)', fontWeight: 600 }}>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', marginBottom: 4 }}>{t('conv.sourceInfo')}</div>
+                <div style={{ fontSize: 'var(--text-base)', color: 'var(--text)', fontWeight: 600 }}>
                   {FMT_LABELS[sourceFormat]} · {frames.length} {t('common.frames')} · {frameW}×{frameH}
                 </div>
                 {sizePreset !== 'original' && (
-                  <div style={{ fontSize: '0.78rem', color: 'var(--accent)', marginTop: 4 }}>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--accent)', marginTop: 4 }}>
                     → {t('conv.outputTo')} {outW}×{outH}
                   </div>
                 )}
@@ -664,6 +678,7 @@ export default function FormatConverterApp({ onBack }) {
           metaText={step1Done ? t('conv.exportHint2').replace('{count}', exportButtons.length) : ''}
         >
           <p className="step-hint">{t('conv.exportHint')}</p>
+          <PngCompressToggle checked={pngCompress} onChange={togglePngCompress} style={{ marginTop: 14, marginBottom: 14 }} />
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
             {exportButtons.map(btn => (
               <button
@@ -673,7 +688,7 @@ export default function FormatConverterApp({ onBack }) {
                 onClick={btn.fn}
               >
                 {exporting === btn.key ? (
-                  <><i className="ri-loader-4-line" style={{ animation: 'spin 1s linear infinite' }} /> {t('common.exporting')}</>
+                  <><i className="ri-loader-4-line" style={{ animation: 'spin 1s linear infinite' }} /> {(btn.key === 'png' && exportProgress) || t('common.exporting')}</>
                 ) : (
                   <><i className={btn.icon} /> {btn.label}</>
                 )}

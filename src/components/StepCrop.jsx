@@ -294,8 +294,8 @@ export default function StepCrop({ stepNum, done, locked, state, update }) {
   const outH = cr?.h || vh
   const metaText = done ? `${outW}×${outH} px` : ''
 
-  const subTitleStyle = { fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 10 }
-  const captionStyle = { fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 10 }
+  const subTitleStyle = { fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 10 }
+  const captionStyle = { fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: 10 }
 
   return (
     <Panel stepNum={stepNum} title={t('step.crop')} done={done} locked={locked} metaText={metaText} defaultOpen={!locked && !done}>
@@ -305,8 +305,8 @@ export default function StepCrop({ stepNum, done, locked, state, update }) {
       }}>
         {/* 左 */}
         <div>
-          <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-            {t('crop.mouseSelect')} <span style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--text-dim)' }}>{t('crop.shiftLock')}</span>
+          <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
+            {t('crop.mouseSelect')} <span style={{ fontWeight: 400, fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{t('crop.shiftLock')}</span>
           </div>
           <div style={subTitleStyle}>{t('crop.dragHint')}</div>
 
@@ -322,7 +322,7 @@ export default function StepCrop({ stepNum, done, locked, state, update }) {
             {!ready && (
               <div style={{
                 position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'var(--text-dim)', fontSize: '0.85rem',
+                color: 'var(--text-dim)', fontSize: 'var(--text-base)',
               }}>
                 {t('crop.loading')}
               </div>
@@ -352,7 +352,7 @@ export default function StepCrop({ stepNum, done, locked, state, update }) {
 
         {/* 右 */}
         <div>
-          <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
+          <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
             {t('crop.preview')}
           </div>
           <div style={subTitleStyle}>{t('crop.previewHint')}</div>
@@ -377,19 +377,19 @@ export default function StepCrop({ stepNum, done, locked, state, update }) {
         display: 'grid', gap: 8, marginTop: 20,
       }}>
         <div className="option-card" style={{ padding: '8px 10px', minHeight: 'auto' }}>
-          <label style={{ fontSize: '0.7rem', marginBottom: 4 }}>{t('crop.leftOffset')}</label>
+          <label style={{ fontSize: 'var(--text-sm)', marginBottom: 4 }}>{t('crop.leftOffset')}</label>
           <NumStepper value={parseFloat(pctLeft)} min={0} max={100} step={0.1} onChange={v => pctChange('left', v)} />
         </div>
         <div className="option-card" style={{ padding: '8px 10px', minHeight: 'auto' }}>
-          <label style={{ fontSize: '0.7rem', marginBottom: 4 }}>{t('crop.topOffset')}</label>
+          <label style={{ fontSize: 'var(--text-sm)', marginBottom: 4 }}>{t('crop.topOffset')}</label>
           <NumStepper value={parseFloat(pctTop)} min={0} max={100} step={0.1} onChange={v => pctChange('top', v)} />
         </div>
         <div className="option-card" style={{ padding: '8px 10px', minHeight: 'auto' }}>
-          <label style={{ fontSize: '0.7rem', marginBottom: 4 }}>{t('crop.cropWidth')}</label>
+          <label style={{ fontSize: 'var(--text-sm)', marginBottom: 4 }}>{t('crop.cropWidth')}</label>
           <NumStepper value={parseFloat(pctW)} min={0} max={100} step={0.1} onChange={v => pctChange('width', v)} />
         </div>
         <div className="option-card" style={{ padding: '8px 10px', minHeight: 'auto' }}>
-          <label style={{ fontSize: '0.7rem', marginBottom: 4 }}>{t('crop.cropHeight')}</label>
+          <label style={{ fontSize: 'var(--text-sm)', marginBottom: 4 }}>{t('crop.cropHeight')}</label>
           <NumStepper value={parseFloat(pctH)} min={0} max={100} step={0.1} onChange={v => pctChange('height', v)} />
         </div>
       </div>

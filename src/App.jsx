@@ -27,11 +27,15 @@ const INITIAL = {
   refFrameTime: 0,
   refFrame: null,        // ImageData
   chromaColor: null,     // hex string or null
+  chromaMode: 'connected',
+  chromaSamples: [],
   chromaEnabled: false,
   tolerance: 28,
   smooth: 14,
   edgeSmooth: true,
   despill: true,
+  edgeTrim: 1,
+  edgeClean: 'light',
   previewMode: 'result', // 'result' | 'alpha' | 'solid'
 
   // Generation results
@@ -64,7 +68,7 @@ export default function App({ onBack }) {
   }, [state.cropRect, update])
 
   // 步骤4参数变化时，已生成的序列图失效 → 步骤5收起
-  const step4Key = `${state.chromaColor}-${state.tolerance}-${state.smooth}-${state.despill}-${state.edgeSmooth}`
+  const step4Key = `${state.chromaMode}-${state.chromaColor}-${JSON.stringify(state.chromaSamples)}-${state.tolerance}-${state.smooth}-${state.despill}-${state.edgeSmooth}-${state.edgeTrim}-${state.edgeClean}`
   const prevStep4Key = useRef(step4Key)
   useEffect(() => {
     const prev = prevStep4Key.current

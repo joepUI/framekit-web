@@ -3,12 +3,14 @@ import Panel from './Panel.jsx'
 import NumStepper from './NumStepper.jsx'
 import { baseName } from '../utils/format.js'
 import { buildSheet } from '../utils/frameExtract.js'
-import { applyChroma } from '../utils/chroma.js'
+import { applyChromaKey, hasChromaKey } from '../utils/chroma.js'
 import { encodeGif } from '../utils/gifEncoder.js'
 import { buildSpineZip } from '../utils/spineExport.js'
 import JSZip from 'jszip'
 import { useToast } from './Toast.jsx'
 import { useI18n } from '../i18n/index.jsx'
+import { canvasToPngBlob, optimizePng, getPngCompressEnabled, setPngCompressEnabled } from '../utils/pngOptimize.js'
+import PngCompressToggle from './PngCompressToggle.jsx'
 
 export default function StepPreviewExport({ stepNum, done, locked, state, update }) {
   const { t } = useI18n()
@@ -37,6 +39,7 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
 
   const frames = state.frames || []
   const total = frames.length
+  const hasColor = hasChromaKey(state)
   const name = baseName(state.videoFile?.name || 'timesheet')
 
   const cols = state.exportCols || 4
@@ -69,10 +72,10 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
 
   // 序列图预览 DataUrl：有色键时优先用透明版
   const sheetDataUrl = useMemo(() => {
-    const canvas = (state.chromaColor && state.sheetAlphaCanvas) ? state.sheetAlphaCanvas : sheetCanvas
+    const canvas = (hasColor && state.sheetAlphaCanvas) ? state.sheetAlphaCanvas : sheetCanvas
     if (!canvas) return null
     try { return canvas.toDataURL('image/png') } catch { return null }
-  }, [sheetCanvas, state.sheetAlphaCanvas, state.chromaColor])
+  }, [sheetCanvas, state.sheetAlphaCanvas, hasColor])
 
   // 渲染后再同步 sheetCanvas 到父级 state——locked 时不同步，避免覆盖步骤4的生成结果
   useEffect(() => {
@@ -83,15 +86,15 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
   // 如果有色键，同步构建透明版——locked 时不构建
   useEffect(() => {
     if (locked) return
-    if (!total || !state.chromaColor) { update({ sheetAlphaCanvas: null }); return }
+    if (!total || !hasColor) { update({ sheetAlphaCanvas: null }); return }
     const alphaFrames = frames.map(f => {
       const copy = new ImageData(new Uint8ClampedArray(f.imageData.data), f.imageData.width, f.imageData.height)
-      applyChroma(copy, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+      applyChromaKey(copy, state)
       return { imageData: copy }
     })
     const canvas = buildSheet(alphaFrames, rows, cols, frameW, frameH, true, gap)
     update({ sheetAlphaCanvas: canvas })
-  }, [total, rows, cols, frameW, frameH, gap, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth, locked])
+  }, [total, rows, cols, frameW, frameH, gap, hasColor, state.chromaMode, state.chromaColor, state.chromaSamples, state.tolerance, state.smooth, state.despill, state.edgeSmooth, state.edgeTrim, state.edgeClean, locked])
 
   // 动画帧绘制（有色键时显示去背景后的帧）
   useEffect(() => {
@@ -103,14 +106,14 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
     animCanvas.height = src.height
     const ctx = animCanvas.getContext('2d')
     ctx.clearRect(0, 0, src.width, src.height)
-    if (state.chromaColor) {
+    if (hasColor) {
       const copy = new ImageData(new Uint8ClampedArray(src.data), src.width, src.height)
-      applyChroma(copy, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+      applyChromaKey(copy, state)
       ctx.putImageData(copy, 0, 0)
     } else {
       ctx.putImageData(src, 0, 0)
     }
-  }, [frameIdx, frames, total, tab, animCanvas, state.chromaColor, state.tolerance, state.smooth, state.despill])
+  }, [frameIdx, frames, total, tab, animCanvas, hasColor, state.chromaMode, state.chromaColor, state.chromaSamples, state.tolerance, state.smooth, state.despill, state.edgeSmooth, state.edgeTrim, state.edgeClean])
 
   // 动画循环
   useEffect(() => {
@@ -135,15 +138,32 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
     setTimeout(() => URL.revokeObjectURL(url), 60000)
   }
 
-  function downloadPng() {
+  // ── PNG 压缩开关 ──
+  const [pngCompress, _setPngCompress] = useState(getPngCompressEnabled)
+  const [pngLoading, setPngLoading] = useState(false)
+  function togglePngCompress(v) { _setPngCompress(v); setPngCompressEnabled(v) }
+
+  async function downloadPng() {
     const c = sheetCanvas || state.sheetCanvas
     if (!c) return
-    c.toBlob(b => { downloadBlob(b, `${name}-timesheet.png`); toast.success(t('toast.normalPngDl')) }, 'image/png')
+    setPngLoading(true)
+    try {
+      const blob = await canvasToPngBlob(c, pngCompress)
+      downloadBlob(blob, `${name}-timesheet.png`)
+      toast.success(t('toast.normalPngDl'))
+    } catch (e) { toast.error(e.message) }
+    finally { setPngLoading(false) }
   }
 
-  function downloadAlphaPng() {
+  async function downloadAlphaPng() {
     if (!state.sheetAlphaCanvas) { toast.warning(t('toast.needColor')); return }
-    state.sheetAlphaCanvas.toBlob(b => { downloadBlob(b, `${name}-timesheet-alpha.png`); toast.success(t('toast.alphaPngDl')) }, 'image/png')
+    setPngLoading(true)
+    try {
+      const blob = await canvasToPngBlob(state.sheetAlphaCanvas, pngCompress)
+      downloadBlob(blob, `${name}-timesheet-alpha.png`)
+      toast.success(t('toast.alphaPngDl'))
+    } catch (e) { toast.error(e.message) }
+    finally { setPngLoading(false) }
   }
 
   async function downloadGif() {
@@ -153,9 +173,9 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
       // 按单帧尺寸预设缩放每帧（有色键时先去背景）
       const scaledFrames = frames.map(f => {
         let src = f.imageData
-        if (state.chromaColor) {
+        if (hasColor) {
           src = new ImageData(new Uint8ClampedArray(src.data), src.width, src.height)
-          applyChroma(src, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+          applyChromaKey(src, state)
         }
         const srcCanvas = document.createElement('canvas')
         srcCanvas.width = src.width
@@ -174,26 +194,32 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
     finally { setGifLoading(false) }
   }
 
+  const [zipProgress, setZipProgress] = useState('')
   async function downloadAlphaZip() {
-    if (!total || !state.chromaColor) { toast.warning(t('toast.needColorBg')); return }
+    if (!total || !hasColor) { toast.warning(t('toast.needColorBg')); return }
     setZipLoading(true)
+    setZipProgress('')
     try {
       const zip = new JSZip()
       for (let i = 0; i < total; i++) {
         const f = frames[i]
         const copy = new ImageData(new Uint8ClampedArray(f.imageData.data), f.imageData.width, f.imageData.height)
-        applyChroma(copy, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+        applyChromaKey(copy, state)
         const c = document.createElement('canvas')
         c.width = copy.width; c.height = copy.height
         c.getContext('2d').putImageData(copy, 0, 0)
-        const blob = await new Promise(res => c.toBlob(res, 'image/png'))
+        let blob = await new Promise(res => c.toBlob(res, 'image/png'))
+        if (pngCompress) {
+          setZipProgress(t('png.compressing').replace('{current}', i + 1).replace('{total}', total))
+          blob = await optimizePng(blob)
+        }
         zip.file(`${name}-frame-${String(i + 1).padStart(3, '0')}.png`, blob)
       }
       const zipBlob = await zip.generateAsync({ type: 'blob' })
       downloadBlob(zipBlob, `${name}-frames.zip`)
       toast.success(t('toast.alphaZipDl'))
     } catch (e) { toast.error(t('toast.zipFailed') + e.message) }
-    finally { setZipLoading(false) }
+    finally { setZipLoading(false); setZipProgress('') }
   }
 
   const sizeDesc = sizePreset === 'original' ? t('export.keepOriginal') : t('export.scaledTo').replace('{w}', frameW).replace('{h}', frameH)
@@ -219,14 +245,14 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
     spineCanvas.height = src.height
     const ctx = spineCanvas.getContext('2d')
     ctx.clearRect(0, 0, src.width, src.height)
-    if (state.chromaColor) {
+    if (hasColor) {
       const copy = new ImageData(new Uint8ClampedArray(src.data), src.width, src.height)
-      applyChroma(copy, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+      applyChromaKey(copy, state)
       ctx.putImageData(copy, 0, 0)
     } else {
       ctx.putImageData(src, 0, 0)
     }
-  }, [showSpine, spineFrameIdx, frames, total, spineCanvas, state.chromaColor, state.tolerance, state.smooth, state.despill])
+  }, [showSpine, spineFrameIdx, frames, total, spineCanvas, hasColor, state.chromaMode, state.chromaColor, state.chromaSamples, state.tolerance, state.smooth, state.despill, state.edgeSmooth, state.edgeTrim, state.edgeClean])
 
   // Spine 动画循环
   useEffect(() => {
@@ -255,9 +281,9 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
     setSpineProgress(0)
     try {
       const processedFrames = frames.map(f => {
-        if (!state.chromaColor) return f.imageData
+        if (!hasColor) return f.imageData
         const copy = new ImageData(new Uint8ClampedArray(f.imageData.data), f.imageData.width, f.imageData.height)
-        applyChroma(copy, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+        applyChromaKey(copy, state)
         return copy
       })
       const w = processedFrames[0].width
@@ -283,15 +309,15 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
   }
 
   // 按钮配置：根据是否去背景动态生成
-  const exportButtons = state.chromaColor
+  const exportButtons = hasColor
     ? [
         { label: t('export.dlGif'), onClick: downloadGif, disabled: gifLoading || !total, loading: gifLoading },
-        { label: t('export.dlAlphaPng'), onClick: downloadAlphaPng, disabled: !state.sheetAlphaCanvas },
-        { label: t('export.dlAlphaZip'), onClick: downloadAlphaZip, disabled: zipLoading || !total || !state.chromaColor, loading: zipLoading },
+        { label: t('export.dlAlphaPng'), onClick: downloadAlphaPng, disabled: pngLoading || !state.sheetAlphaCanvas, loading: pngLoading },
+        { label: t('export.dlAlphaZip'), onClick: downloadAlphaZip, disabled: zipLoading || !total || !hasColor, loading: zipLoading, progressText: zipProgress },
         { label: t('export.enterSpine'), onClick: openSpine, disabled: !total, primary: true },
       ]
     : [
-        { label: t('export.dlNormalPng'), onClick: downloadPng, disabled: !sheetCanvas && !state.sheetCanvas },
+        { label: t('export.dlNormalPng'), onClick: downloadPng, disabled: pngLoading || (!sheetCanvas && !state.sheetCanvas), loading: pngLoading },
         { label: t('export.dlGif'), onClick: downloadGif, disabled: gifLoading || !total, loading: gifLoading },
         { label: t('export.enterSpine'), onClick: openSpine, disabled: !total, primary: true },
       ]
@@ -326,7 +352,7 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
                   style={{ width: '100%', display: 'block' }} />
               </div>
             ) : (
-              <div style={{ color: 'var(--text-dim)', fontSize: '0.82rem', padding: '60px 0', textAlign: 'center',
+              <div style={{ color: 'var(--text-dim)', fontSize: 'var(--text-sm)', padding: '60px 0', textAlign: 'center',
                 border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>
                 {t('export.noPreview')}
               </div>
@@ -346,10 +372,10 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
                 <canvas ref={setAnimCanvas} style={{ width: '100%', display: 'block' }} />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)' }}>
+                <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text)' }}>
                   {t('export.frame').replace('{current}', frameIdx + 1).replace('{total}', total)}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
                   {animFps} {t('export.fpsPreview')}
                 </div>
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
@@ -370,18 +396,18 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
           {/* 导出列数 + 间距 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 12 }}>
             <div>
-              <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.cols')}</label>
+              <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.cols')}</label>
               <NumStepper value={cols} min={1} max={8} onChange={v => update({ exportCols: v })} />
             </div>
             <div>
-              <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.gap')}</label>
+              <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.gap')}</label>
               <NumStepper value={gap} min={0} max={48} onChange={v => update({ exportGap: v })} />
             </div>
           </div>
 
           {/* 单帧尺寸预设 */}
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.sizePreset')}</label>
+            <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.sizePreset')}</label>
             <div style={{ position: 'relative' }}>
               <select value={sizePreset}
                 onChange={e => update({ exportSizePreset: e.target.value })}
@@ -408,19 +434,22 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
 
           {/* 预估导出尺寸 */}
           <div className="option-card" style={{ padding: '10px 14px', minHeight: 'auto', marginBottom: 14 }}>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{t('export.estimatedSize')}</div>
-            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text)', margin: '2px 0' }}>{sheetW} × {sheetH}</div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{sizeDesc}</div>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{t('export.estimatedSize')}</div>
+            <div style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: 'var(--text)', margin: '2px 0' }}>{sheetW} × {sheetH}</div>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{sizeDesc}</div>
             {(sheetW > 8192 || sheetH > 8192) && (
-              <div style={{ fontSize: '0.72rem', color: 'var(--warning)', marginTop: 4 }}>{t('export.sizeTooLarge')}</div>
+              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--warning)', marginTop: 4 }}>{t('export.sizeTooLarge')}</div>
             )}
           </div>
+
+          {/* PNG 压缩开关 */}
+          <PngCompressToggle checked={pngCompress} onChange={togglePngCompress} style={{ marginTop: 14, marginBottom: 14 }} />
 
           {/* 导出按钮 */}
           <div className="grid-2col" style={{ display: 'grid', gap: 8 }}>
             {exportButtons.map((b, i) => (
               <button key={i} className="btn btn-primary" onClick={b.onClick} disabled={b.disabled}>
-                {b.loading ? t('export.processing') : b.label}
+                {b.loading ? (b.progressText || t('export.processing')) : b.label}
               </button>
             ))}
           </div>
@@ -456,15 +485,15 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
                   <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text)' }}>
                     {t('spine.title')}
                   </h3>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                    {state.chromaColor ? t('spine.transparentFirst') : t('spine.normalFrame')} · {(frames[0]?.imageData?.width) || 0} × {(frames[0]?.imageData?.height) || 0}
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
+                    {hasColor ? t('spine.transparentFirst') : t('spine.normalFrame')} · {(frames[0]?.imageData?.width) || 0} × {(frames[0]?.imageData?.height) || 0}
                   </span>
                 </div>
 
                 <div className="option-card" style={{ padding: '10px 14px', minHeight: 'auto', marginBottom: 10 }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{t('spine.currentAsset')}</div>
-                  <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text)' }}>{total} {t('common.frames')}</div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{t('spine.currentAsset')}</div>
+                  <div style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: 'var(--text)' }}>{total} {t('common.frames')}</div>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
                     {state.videoFile?.name} · {spineFps} FPS
                   </div>
                 </div>
@@ -480,10 +509,10 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-                  <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)' }}>
+                  <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text)' }}>
                     {t('export.frame').replace('{current}', spineFrameIdx + 1).replace('{total}', total)}
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
                     {((spineFrameIdx / Math.max(spineFps, 1))).toFixed(3)}s · {spineFps} {t('export.fpsPreview')}
                   </div>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
@@ -501,22 +530,22 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                   <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text)' }}>{t('spine.exportParams')}</span>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{t('spine.jsonPngZip')}</span>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{t('spine.jsonPngZip')}</span>
                 </div>
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 16px' }}>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: '0 0 16px' }}>
                   {t('spine.exportHint')}
                 </p>
 
                 <div className="grid-2col" style={{ display: 'grid', gap: 10, marginBottom: 10 }}>
                   <div>
-                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('spine.skeletonName')}</label>
+                    <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('spine.skeletonName')}</label>
                     <input type="text" value={skeletonName}
                       onChange={e => setSkeletonName(e.target.value)}
                       style={{ width: '100%', boxSizing: 'border-box', height: 35 }}
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('spine.animationName')}</label>
+                    <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('spine.animationName')}</label>
                     <input type="text" value={animationName}
                       onChange={e => setAnimationName(e.target.value)}
                       style={{ width: '100%', boxSizing: 'border-box', height: 35 }}
@@ -526,14 +555,14 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
 
                 <div className="grid-2col" style={{ display: 'grid', gap: 10, marginBottom: 14 }}>
                   <div>
-                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('spine.slotName')}</label>
+                    <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('spine.slotName')}</label>
                     <input type="text" value={slotName}
                       onChange={e => setSlotName(e.target.value)}
                       style={{ width: '100%', boxSizing: 'border-box', height: 35 }}
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('spine.exportFps')}</label>
+                    <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('spine.exportFps')}</label>
                     <NumStepper value={spineFps} min={1} max={60} onChange={setSpineFps} />
                   </div>
                 </div>
@@ -552,7 +581,7 @@ export default function StepPreviewExport({ stepNum, done, locked, state, update
                     }}>
                       {spineLoop && '✓'}
                     </span>
-                    <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)' }}>{t('spine.loopPreview')}</span>
+                    <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text)' }}>{t('spine.loopPreview')}</span>
                   </label>
                 </div>
 

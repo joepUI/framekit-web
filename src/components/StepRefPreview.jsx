@@ -1,10 +1,11 @@
 import { useRef, useState, useEffect } from 'react'
 import Panel from './Panel.jsx'
-import { fmtTime, rgbToHex, hexToRgb } from '../utils/format.js'
+import { fmtTime, rgbToHex } from '../utils/format.js'
 import { buildSheet, extractFrame } from '../utils/frameExtract.js'
-import { applyChroma } from '../utils/chroma.js'
+import { applyChromaKey, hasChromaKey, CHROMA_MODE_CONNECTED } from '../utils/chroma.js'
 import { useToast } from './Toast.jsx'
 import ChromaParams from './ChromaParams.jsx'
+import ChromaKeyControl from './ChromaKeyControl.jsx'
 import { useI18n } from '../i18n/index.jsx'
 
 export default function StepRefPreview({ stepNum, done, locked, state, update }) {
@@ -82,13 +83,13 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
     c.height = h
     const ctx = c.getContext('2d')
 
-    if (!state.chromaColor) {
+    if (!hasChromaKey(state)) {
       ctx.putImageData(state.refFrame, 0, 0)
       return
     }
 
     const copy = new ImageData(new Uint8ClampedArray(state.refFrame.data), w, h)
-    applyChroma(copy, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+    applyChromaKey(copy, state)
 
     if (previewMode === 'alpha') {
       const alphaData = new ImageData(w, h)
@@ -111,7 +112,7 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
       ctx.clearRect(0, 0, w, h)
       ctx.putImageData(copy, 0, 0)
     }
-  }, [state.refFrame, state.chromaColor, state.tolerance, state.smooth, state.despill, previewMode, previewCanvas, solidBgColor])
+  }, [state.refFrame, state.chromaMode, state.chromaColor, state.chromaSamples, state.tolerance, state.smooth, state.despill, state.edgeSmooth, state.edgeTrim, state.edgeClean, previewMode, previewCanvas, solidBgColor])
 
   // 点击取色
   function pickColor(e) {
@@ -122,7 +123,12 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
     const sy = Math.round((e.clientY - rect.top) / rect.height * canvas.height)
     const px = canvas.getContext('2d').getImageData(sx, sy, 1, 1).data
     const hex = rgbToHex(px[0], px[1], px[2])
-    update({ chromaColor: hex, chromaEnabled: true })
+    if ((state.chromaMode || CHROMA_MODE_CONNECTED) === CHROMA_MODE_CONNECTED) {
+      const nextSamples = [...(state.chromaSamples || []), { x: sx, y: sy, color: hex }].slice(-5)
+      update({ chromaColor: nextSamples[0]?.color || hex, chromaSamples: nextSamples, chromaEnabled: true })
+    } else {
+      update({ chromaColor: hex, chromaSamples: [{ x: sx, y: sy, color: hex }], chromaEnabled: true })
+    }
     setClickPos({ x: sx, y: sy })
   }
 
@@ -189,12 +195,12 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
       const sheetCanvas = buildSheet(processedFrames, rows, cols, frameW, frameH, false, gap)
 
       let sheetAlphaCanvas = null
-      if (state.chromaColor) {
+      if (hasChromaKey(state)) {
         setGenMsg(t('ref.processingAlpha'))
         setGenProgress(90)
         const alphaFrames = frames.map(f => {
           const copy = new ImageData(new Uint8ClampedArray(f.imageData.data), f.imageData.width, f.imageData.height)
-          applyChroma(copy, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+          applyChromaKey(copy, state)
           return { imageData: copy }
         })
         sheetAlphaCanvas = buildSheet(alphaFrames, rows, cols, frameW, frameH, true, gap)
@@ -211,7 +217,7 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
     }
   }
 
-  const hasColor = !!state.chromaColor
+  const hasColor = hasChromaKey(state)
 
   return (
     <Panel
@@ -223,7 +229,7 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
       metaText={done ? t('ref.generated') : (hasColor ? `${t('ref.samplePoint')} ${state.chromaColor}` : '')}
     >
       {/* 步骤说明 */}
-      <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 16 }}>
         {t('ref.hint')}
       </p>
 
@@ -231,8 +237,8 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
       <div className="option-card" style={{ marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 16 }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{t('ref.timeLabel')}</label>
-            <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)', fontFamily: 'monospace' }}>{fmtTime(refTime)}</span>
+            <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>{t('ref.timeLabel')}</label>
+            <span style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text)', fontFamily: 'monospace' }}>{fmtTime(refTime)}</span>
           </div>
           <input
             type="range" min={segStart} max={segEnd} step={0.01}
@@ -240,7 +246,7 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
             onChange={e => update({ refFrameTime: parseFloat(e.target.value) })}
             style={{ width: '100%' }}
           />
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: 4, textAlign: 'right' }}>
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', marginTop: 4, textAlign: 'right' }}>
             {fmtTime(segStart)} - {fmtTime(segEnd)} {t('ref.rangeHint')}
           </div>
         </div>
@@ -255,31 +261,20 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div>
-                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>{t('ref.original')}</span>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--accent)', marginTop: 2 }}>
-                    {hasColor ? t('ref.colorPicked') : t('ref.clickSample')}
+                  <span style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text)' }}>{t('ref.original')}</span>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--accent)', marginTop: 2 }}>
+                    {hasColor
+                      ? ((state.chromaMode || CHROMA_MODE_CONNECTED) === CHROMA_MODE_CONNECTED ? t('chroma.connectedPicked') : t('ref.colorPicked'))
+                      : t('ref.clickSample')}
                   </div>
                 </div>
-                {hasColor && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 6,
-                      padding: '0 10px', height: 35,
-                      background: 'var(--surface2)', borderRadius: 'var(--radius-sm)',
-                      border: '1px solid var(--border)',
-                    }}>
-                      <div className="color-dot" style={{ background: state.chromaColor }} />
-                      <span className="chroma-rgb-text" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text)', fontFamily: 'monospace' }}>
-                        {(() => { const rgb = hexToRgb(state.chromaColor); return `RGB(${rgb.r}, ${rgb.g}, ${rgb.b})` })()}
-                      </span>
-                    </div>
-                    <button className="btn btn-ghost"
-                      onClick={() => { update({ chromaColor: null, chromaEnabled: false, sheetAlphaCanvas: null }); setClickPos(null) }}
-                    >
-                      {t('common.clear')}
-                    </button>
-                  </div>
-                )}
+                <ChromaKeyControl
+                  mode={state.chromaMode}
+                  color={state.chromaColor}
+                  samples={state.chromaSamples}
+                  onModeChange={mode => update({ chromaMode: mode, chromaColor: null, chromaSamples: [], chromaEnabled: false, sheetAlphaCanvas: null })}
+                  onClear={() => { update({ chromaColor: null, chromaSamples: [], chromaEnabled: false, sheetAlphaCanvas: null }); setClickPos(null) }}
+                />
               </div>
               <div style={{
                 position: 'relative',
@@ -301,8 +296,8 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
                       background: 'rgba(255,255,255,0.92)', borderRadius: 'var(--radius-sm)',
                       padding: '14px 20px', textAlign: 'center', maxWidth: '80%',
                     }}>
-                      <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#2d1b00' }}>{t('ref.clickBgColor')}</div>
-                      <div style={{ fontSize: '0.72rem', color: '#7a5c30', marginTop: 4 }}>
+                      <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: '#2d1b00' }}>{t('ref.clickBgColor')}</div>
+                      <div style={{ fontSize: 'var(--text-sm)', color: '#7a5c30', marginTop: 4 }}>
                         {t('ref.skipHint')}
                       </div>
                     </div>
@@ -310,7 +305,7 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
                 )}
               </div>
               {clickPos && (
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 6 }}>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', marginTop: 6 }}>
                   {t('ref.samplePoint')}: ({clickPos.x}, {clickPos.y})
                 </div>
               )}
@@ -320,8 +315,8 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div>
-                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>{t('ref.mattePreview')}</span>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--accent)', marginTop: 2 }}>{t('ref.matteHint')}</div>
+                  <span style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text)' }}>{t('ref.mattePreview')}</span>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--accent)', marginTop: 2 }}>{t('ref.matteHint')}</div>
                 </div>
                 <div className="segmented-control" style={{ height: 35 }}>
                   {[
@@ -332,7 +327,7 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
                     <button key={m.key}
                       className={`segmented-btn ${previewMode === m.key ? 'active' : ''}`}
                       onClick={() => setPreviewMode(m.key)}
-                      style={{ fontSize: '0.75rem', padding: '0 12px' }}
+                      style={{ fontSize: 'var(--text-sm)', padding: '0 12px' }}
                     >
                       {m.label}
                     </button>
@@ -350,7 +345,7 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
               </div>
               {previewMode === 'solid' && (
                 <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{t('ref.checkColor')}</span>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{t('ref.checkColor')}</span>
                   <label style={{ position: 'relative', display: 'inline-block', width: 18, height: 18, cursor: 'pointer' }}>
                     <div style={{
                       width: 18, height: 18, borderRadius: 0,
@@ -361,7 +356,7 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
                       style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
                     />
                   </label>
-                  <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'var(--text)' }}>
+                  <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'monospace', color: 'var(--text)' }}>
                     {solidBgColor.toUpperCase()}
                   </span>
                 </div>
@@ -375,6 +370,7 @@ export default function StepRefPreview({ stepNum, done, locked, state, update })
         <ChromaParams
           tolerance={state.tolerance} smooth={state.smooth}
           despill={state.despill} edgeSmooth={state.edgeSmooth}
+          edgeTrim={state.edgeTrim} edgeClean={state.edgeClean}
           onChange={update}
           title={t('chroma.advancedTitle')} hint={t('chroma.advancedHint')}
         />

@@ -3,3 +3,9 @@ dist
 .DS_Store
 *.local
 .vscode
+
+# Local-only private reference and sync helper files.
+# Do not publish these to the open-source repo.
+FrameKit/
+SYNC.md
+scripts/sync-open-source.mjs

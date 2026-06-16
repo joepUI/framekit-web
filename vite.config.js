@@ -5,6 +5,6 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   optimizeDeps: {
-    exclude: ['wasm-webp'],
+    exclude: ['wasm-webp', '@jsquash/oxipng'],
   },
 })

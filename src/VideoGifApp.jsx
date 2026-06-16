@@ -2,12 +2,13 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import Panel from './components/Panel.jsx'
 import NumStepper from './components/NumStepper.jsx'
 import StepCropComponent from './components/StepCrop.jsx'
-import { fmtTime, fmtSize, baseName, rgbToHex, hexToRgb, estimateMemory } from './utils/format.js'
+import { fmtTime, fmtSize, baseName, rgbToHex, estimateMemory } from './utils/format.js'
 import { extractFrame } from './utils/frameExtract.js'
-import { applyChroma } from './utils/chroma.js'
+import { applyChromaKey, hasChromaKey, CHROMA_MODE_CONNECTED } from './utils/chroma.js'
 import { encodeGif } from './utils/gifEncoder.js'
 import { useToast } from './components/Toast.jsx'
 import ChromaParams from './components/ChromaParams.jsx'
+import ChromaKeyControl from './components/ChromaKeyControl.jsx'
 import { useI18n } from './i18n/index.jsx'
 
 // 尺寸预设列表
@@ -49,7 +50,7 @@ const INITIAL = {
   cropRect: null,
   segStart: 0, segEnd: 0,
   fps: 12, speed: 1, sizePreset: 'original',
-  chromaColor: null, tolerance: 28, smooth: 14, despill: true, edgeSmooth: true,
+  chromaColor: null, chromaMode: CHROMA_MODE_CONNECTED, chromaSamples: [], tolerance: 28, smooth: 14, despill: true, edgeSmooth: true, edgeTrim: 1, edgeClean: 'light',
 }
 
 export default function VideoGifApp({ onBack }) {
@@ -177,6 +178,7 @@ function setState_reset(update, file, url) {
     videoDuration: 0, videoWidth: 0, videoHeight: 0,
     cropRect: null, segStart: 0, segEnd: 0,
     chromaColor: null,
+    chromaSamples: [],
   })
 }
 
@@ -200,6 +202,7 @@ function StepChroma({ state, update, step2Done }) {
   const [previewCanvas, setPreviewCanvas] = useState(null)
   const [previewMode, setPreviewMode] = useState('result')
   const [solidBgColor, setSolidBgColor] = useState('#2e70ff')
+  const hasColor = hasChromaKey(state)
 
   const crop = state.cropRect
   const outW = crop?.w || state.videoWidth || 1
@@ -241,11 +244,11 @@ function StepChroma({ state, update, step2Done }) {
     const { width: w, height: h, data } = state.refFrame
     previewCanvas.width = w; previewCanvas.height = h
     const ctx = previewCanvas.getContext('2d')
-    if (!state.chromaColor) {
+    if (!hasColor) {
       ctx.putImageData(state.refFrame, 0, 0)
     } else {
       const copy = new ImageData(new Uint8ClampedArray(data), w, h)
-      applyChroma(copy, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+      applyChromaKey(copy, state)
       if (previewMode === 'alpha') {
         const a = new ImageData(w, h)
         for (let i = 0; i < copy.data.length; i += 4) {
@@ -260,7 +263,7 @@ function StepChroma({ state, update, step2Done }) {
         ctx.clearRect(0, 0, w, h); ctx.putImageData(copy, 0, 0)
       }
     }
-  }, [previewCanvas, state.refFrame, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth, previewMode, solidBgColor])
+  }, [previewCanvas, state.refFrame, hasColor, state.chromaMode, state.chromaColor, state.chromaSamples, state.tolerance, state.smooth, state.despill, state.edgeSmooth, state.edgeTrim, state.edgeClean, previewMode, solidBgColor])
 
   function pickColor(e) {
     if (!state.refFrame || !origCanvas) return
@@ -268,10 +271,14 @@ function StepChroma({ state, update, step2Done }) {
     const sx = Math.round((e.clientX - rect.left) / rect.width * origCanvas.width)
     const sy = Math.round((e.clientY - rect.top) / rect.height * origCanvas.height)
     const px = origCanvas.getContext('2d').getImageData(sx, sy, 1, 1).data
-    update({ chromaColor: rgbToHex(px[0], px[1], px[2]) })
+    const hex = rgbToHex(px[0], px[1], px[2])
+    if ((state.chromaMode || CHROMA_MODE_CONNECTED) === CHROMA_MODE_CONNECTED) {
+      const nextSamples = [...(state.chromaSamples || []), { x: sx, y: sy, color: hex }].slice(-5)
+      update({ chromaColor: nextSamples[0]?.color || hex, chromaSamples: nextSamples })
+    } else {
+      update({ chromaColor: hex, chromaSamples: [{ x: sx, y: sy, color: hex }] })
+    }
   }
-
-  const hasColor = !!state.chromaColor
 
   return (
     <Panel stepNum={3} title={t('gif.stepChroma')} done={hasColor} locked={!step2Done} defaultOpen={false}
@@ -287,30 +294,28 @@ function StepChroma({ state, update, step2Done }) {
           <div>
             <div className="row-between" style={{ marginBottom: 8 }}>
               <div>
-                <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>{t('gif.refFrame')}</span>
+                <span style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>{t('gif.refFrame')}</span>
                 <div className="sub-accent">
-                  {hasColor ? t('gif.colorPicked') : t('gif.clickOptional')}
+                  {hasColor
+                    ? ((state.chromaMode || CHROMA_MODE_CONNECTED) === CHROMA_MODE_CONNECTED ? t('chroma.connectedPicked') : t('gif.colorPicked'))
+                    : t('gif.clickOptional')}
                 </div>
               </div>
-              {hasColor && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 10px', height: 35, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
-                    <div className="color-dot" style={{ background: state.chromaColor }} />
-                    <span className="chroma-rgb-text" style={{ fontSize: '0.75rem', fontWeight: 600, fontFamily: 'monospace' }}>
-                      {(() => { const rgb = hexToRgb(state.chromaColor); return `RGB(${rgb.r}, ${rgb.g}, ${rgb.b})` })()}
-                    </span>
-                  </div>
-                  <button className="btn btn-ghost" onClick={() => update({ chromaColor: null })}>{t('common.clear')}</button>
-                </div>
-              )}
+              <ChromaKeyControl
+                mode={state.chromaMode}
+                color={state.chromaColor}
+                samples={state.chromaSamples}
+                onModeChange={mode => update({ chromaMode: mode, chromaColor: null, chromaSamples: [] })}
+                onClear={() => update({ chromaColor: null, chromaSamples: [] })}
+              />
             </div>
             <div style={{ position: 'relative', border: '1px solid var(--border)', background: '#000' }}>
               <canvas ref={setOrigCanvas} onClick={pickColor} className="canvas-crosshair" />
               {!hasColor && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)', pointerEvents: 'none' }}>
                   <div style={{ background: 'rgba(255,255,255,0.92)', padding: '14px 20px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#2d1b00' }}>{t('gif.clickBgColor')}</div>
-                    <div style={{ fontSize: '0.72rem', color: '#7a5c30', marginTop: 4 }}>{t('gif.skipExportNormal')}</div>
+                    <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: '#2d1b00' }}>{t('gif.clickBgColor')}</div>
+                    <div style={{ fontSize: 'var(--text-sm)', color: '#7a5c30', marginTop: 4 }}>{t('gif.skipExportNormal')}</div>
                   </div>
                 </div>
               )}
@@ -320,11 +325,11 @@ function StepChroma({ state, update, step2Done }) {
           {/* 右：预览 */}
           <div>
             <div className="row-between" style={{ marginBottom: 8 }}>
-              <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>{t('gif.effectPreview')}</span>
+              <span style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>{t('gif.effectPreview')}</span>
               <div className="segmented-control" style={{ height: 35 }}>
                 {[{ key: 'result', label: t('gif.modeResult') }, { key: 'alpha', label: t('gif.modeAlpha') }, { key: 'solid', label: t('gif.modeSolid') }].map(m => (
                   <button key={m.key} className={`segmented-btn ${previewMode === m.key ? 'active' : ''}`}
-                    onClick={() => setPreviewMode(m.key)} style={{ fontSize: '0.75rem', padding: '0 12px' }}>
+                    onClick={() => setPreviewMode(m.key)} style={{ fontSize: 'var(--text-sm)', padding: '0 12px' }}>
                     {m.label}
                   </button>
                 ))}
@@ -338,7 +343,7 @@ function StepChroma({ state, update, step2Done }) {
             </div>
             {previewMode === 'solid' && (
               <div className="solid-color-row">
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{t('gif.checkColor')}</span>
+                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{t('gif.checkColor')}</span>
                 <label className="color-picker-wrap">
                   <div style={{ width: 18, height: 18, background: solidBgColor, border: '1px solid var(--border)' }} />
                   <input type="color" value={solidBgColor} onChange={e => setSolidBgColor(e.target.value)} />
@@ -353,6 +358,7 @@ function StepChroma({ state, update, step2Done }) {
       {hasColor && (
         <ChromaParams
           tolerance={state.tolerance} smooth={state.smooth} despill={state.despill} edgeSmooth={state.edgeSmooth}
+          edgeTrim={state.edgeTrim} edgeClean={state.edgeClean}
           title={t('chroma.advancedTitle')} hint={t('chroma.advancedHint')}
           onChange={update}
         />
@@ -376,6 +382,7 @@ function StepParamsPreview({ state, update, step2Done, outW, outH, sizePresets }
   const fps = state.fps || 12
   const estimatedFrames = Math.max(1, Math.round(segLen * fps))
   const currentTime = scrubTime ?? start
+  const hasColor = hasChromaKey(state)
 
   // 片段范围变化时重置 scrubTime
   useEffect(() => {
@@ -413,12 +420,12 @@ function StepParamsPreview({ state, update, step2Done, outW, outH, sizePresets }
       if (crop) ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, outW, outH)
       else ctx.drawImage(video, 0, 0, outW, outH)
       const id = ctx.getImageData(0, 0, outW, outH)
-      if (state.chromaColor) applyChroma(id, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+      if (hasColor) applyChromaKey(id, state)
       previewCanvas.width = outW; previewCanvas.height = outH
       previewCanvas.getContext('2d').putImageData(id, 0, 0)
     }, { once: true })
     return () => { alive = false; video.src = ''; video.load() }
-  }, [previewCanvas, currentTime, state.videoUrl, state.cropRect, outW, outH, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth, step2Done])
+  }, [previewCanvas, currentTime, state.videoUrl, state.cropRect, outW, outH, hasColor, state.chromaMode, state.chromaColor, state.chromaSamples, state.tolerance, state.smooth, state.despill, state.edgeSmooth, state.edgeTrim, state.edgeClean, step2Done])
 
   return (
     <Panel stepNum={4} title={t('gif.stepParams')} done={false} locked={!step2Done} defaultOpen={true}
@@ -430,7 +437,7 @@ function StepParamsPreview({ state, update, step2Done, outW, outH, sizePresets }
         <div>
           {/* 预览区：固定方形背景，图片按比例居中（contain 效果） */}
           <div style={{
-            background: state.chromaColor
+            background: hasColor
               ? 'repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%) 0 0 / 12px 12px'
               : 'var(--surface2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -441,7 +448,7 @@ function StepParamsPreview({ state, update, step2Done, outW, outH, sizePresets }
             <div style={{
               position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)',
               background: 'rgba(30,20,5,0.75)', color: '#fff',
-              padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontFamily: 'monospace',
+              padding: '4px 12px', borderRadius: 20, fontSize: 'var(--text-sm)', fontFamily: 'monospace',
               pointerEvents: 'none',
             }}>
               {String(Math.floor(currentTime / 60)).padStart(2,'0')}:{(currentTime % 60).toFixed(2).padStart(5,'0')}
@@ -480,7 +487,7 @@ function StepParamsPreview({ state, update, step2Done, outW, outH, sizePresets }
                 <input type="range" min={0} max={dur} step={0.1} value={end}
                   onChange={e => update({ segEnd: Math.max(parseFloat(e.target.value), start + 0.1) })} />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: 4 }}>
                 <span>{t('gif.segStart')} <strong>{fmtTime(start)}</strong></span>
                 <span>{t('gif.segDuration')} <strong>{fmtTime(segLen)}</strong></span>
                 <span>{t('gif.segEnd')} <strong>{fmtTime(end)}</strong></span>
@@ -508,7 +515,7 @@ function StepParamsPreview({ state, update, step2Done, outW, outH, sizePresets }
               {SPEED_OPTIONS.map(s => (
                 <button key={s.value}
                   className={`btn ${state.speed === s.value ? 'btn-primary' : 'btn-ghost'}`}
-                  style={{ height: 28, padding: '0 10px', fontSize: '0.8rem' }}
+                  style={{ height: 28, padding: '0 10px', fontSize: 'var(--text-sm)' }}
                   onClick={() => update({ speed: s.value })}>
                   {s.label}
                 </button>
@@ -557,6 +564,7 @@ function StepGenerate({ state, update, step2Done, outW, outH }) {
   const fps = state.fps || 12
   const estimatedFrames = Math.max(1, Math.round(segLen * fps))
   const memInfo = estimateMemory(estimatedFrames, outW, outH)
+  const hasColor = hasChromaKey(state)
 
   // gifUrl 变化或组件卸载时释放旧的 ObjectURL
   useEffect(() => {
@@ -566,7 +574,7 @@ function StepGenerate({ state, update, step2Done, outW, outH }) {
   // 参数变化时清除已生成的 GIF
   useEffect(() => { setGifUrl(null) },
     [state.segStart, state.segEnd, state.fps, state.speed, state.sizePreset,
-     state.chromaColor, state.tolerance, state.smooth, state.despill, state.cropRect])
+     hasColor, state.chromaMode, state.chromaColor, state.chromaSamples, state.tolerance, state.smooth, state.despill, state.edgeSmooth, state.edgeTrim, state.edgeClean, state.cropRect])
 
   async function generate() {
     if (!state.videoUrl) return
@@ -592,7 +600,7 @@ function StepGenerate({ state, update, step2Done, outW, outH }) {
         setProgressMsg(t('gif.extractFrame').replace('{current}', i + 1).replace('{total}', total))
         try {
           const { imageData } = await extractFrame(video, times[i], state.cropRect, outW, outH)
-          if (state.chromaColor) applyChroma(imageData, state.chromaColor, state.tolerance, state.smooth, state.despill, state.edgeSmooth)
+          if (hasColor) applyChromaKey(imageData, state)
           frames.push(imageData)
         } catch (e) { console.error('帧提取失败', i, e) }
       }
@@ -670,7 +678,7 @@ function StepGenerate({ state, update, step2Done, outW, outH }) {
           <div style={{
             display: 'inline-block', marginBottom: 12,
             border: '1px solid var(--border)',
-            background: state.chromaColor
+            background: hasColor
               ? 'repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%) 0 0 / 12px 12px'
               : '#f5ead0',
           }}>
@@ -680,7 +688,7 @@ function StepGenerate({ state, update, step2Done, outW, outH }) {
             <button className="btn btn-primary" onClick={download}>
               <i className="ri-download-line" /> {t('gif.dlGif')}
             </button>
-            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{fmtSize(gifSize)}</span>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>{fmtSize(gifSize)}</span>
           </div>
         </div>
       )}

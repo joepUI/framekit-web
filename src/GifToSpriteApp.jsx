@@ -4,11 +4,14 @@ import NumStepper from './components/NumStepper.jsx'
 import ChromaParams from './components/ChromaParams.jsx'
 import { decodeGif } from './utils/gifDecoder.js'
 import { buildSheet } from './utils/frameExtract.js'
-import { applyChroma } from './utils/chroma.js'
-import { baseName, rgbToHex, hexToRgb } from './utils/format.js'
+import { applyChromaKey, hasChromaKey, CHROMA_MODE_CONNECTED } from './utils/chroma.js'
+import { baseName, rgbToHex } from './utils/format.js'
+import ChromaKeyControl from './components/ChromaKeyControl.jsx'
 import JSZip from 'jszip'
 import { useToast } from './components/Toast.jsx'
 import { useI18n } from './i18n/index.jsx'
+import { canvasToPngBlob, optimizePng, getPngCompressEnabled, setPngCompressEnabled } from './utils/pngOptimize.js'
+import PngCompressToggle from './components/PngCompressToggle.jsx'
 
 const INITIAL = {
   sourceFile: null,
@@ -22,10 +25,14 @@ const INITIAL = {
   frameStep: 1,     // 抽帧间隔，1 = 全部保留
   // 去背景参数（可选）
   chromaColor: null,
+  chromaMode: CHROMA_MODE_CONNECTED,
+  chromaSamples: [],
   tolerance: 28,
   smooth: 14,
   despill: true,
   edgeSmooth: true,
+  edgeTrim: 1,
+  edgeClean: 'light',
   // 导出参数
   exportCols: 4,
   exportGap: 0,
@@ -40,7 +47,7 @@ export default function GifToSpriteApp({ onBack }) {
 
   const {
     rawFrames, frameW, frameH, frameStart, frameEnd, frameStep,
-    chromaColor, tolerance, smooth, despill, edgeSmooth,
+    chromaColor, chromaMode, chromaSamples, tolerance, smooth, despill, edgeSmooth, edgeTrim, edgeClean,
     exportCols, exportGap, exportSizePreset, sourceFile,
   } = state
 
@@ -71,6 +78,7 @@ export default function GifToSpriteApp({ onBack }) {
         frameEnd: decoded.length,
         frameStep: 1,
         chromaColor: null, // 新文件清除旧取色
+        chromaSamples: [],
       })
       setRefFrameIdx(0)
       toast.success(t('g2s.decodeOk').replace('{count}', decoded.length))
@@ -111,19 +119,20 @@ export default function GifToSpriteApp({ onBack }) {
   const [refFrameIdx, setRefFrameIdx] = useState(0)
   const [origCanvas, setOrigCanvas] = useState(null)
   const [previewCanvas, setPreviewCanvas] = useState(null)
+  const hasColor = hasChromaKey(state)
 
   // 参考帧索引随抽帧结果收敛，防越界
   const safeRefIdx = frames.length ? Math.min(refFrameIdx, frames.length - 1) : 0
 
   // 去背景后的帧（取色才处理，否则原样）— 预览/导出统一用它
   const processedFrames = useMemo(() => {
-    if (!chromaColor) return frames
+    if (!hasColor) return frames
     return frames.map(f => {
       const copy = new ImageData(new Uint8ClampedArray(f.imageData.data), f.imageData.width, f.imageData.height)
-      applyChroma(copy, chromaColor, tolerance, smooth, despill, edgeSmooth)
+      applyChromaKey(copy, state)
       return { imageData: copy }
     })
-  }, [frames, chromaColor, tolerance, smooth, despill, edgeSmooth])
+  }, [frames, hasColor, chromaMode, chromaColor, chromaSamples, tolerance, smooth, despill, edgeSmooth, edgeTrim, edgeClean])
 
   // 参考帧原图：callback ref 挂载或参考帧变化时重绘
   useEffect(() => {
@@ -143,12 +152,12 @@ export default function GifToSpriteApp({ onBack }) {
     const w = f.imageData.width, h = f.imageData.height
     previewCanvas.width = w; previewCanvas.height = h
     const ctx = previewCanvas.getContext('2d')
-    if (!chromaColor) {
+    if (!hasColor) {
       ctx.putImageData(f.imageData, 0, 0)
       return
     }
     const copy = new ImageData(new Uint8ClampedArray(f.imageData.data), w, h)
-    applyChroma(copy, chromaColor, tolerance, smooth, despill, edgeSmooth)
+    applyChromaKey(copy, state)
     if (previewMode === 'alpha') {
       const alphaData = new ImageData(w, h)
       for (let i = 0; i < copy.data.length; i += 4) {
@@ -167,7 +176,7 @@ export default function GifToSpriteApp({ onBack }) {
       ctx.clearRect(0, 0, w, h)
       ctx.putImageData(copy, 0, 0)
     }
-  }, [previewCanvas, frames, safeRefIdx, chromaColor, tolerance, smooth, despill, edgeSmooth, previewMode, solidBgColor])
+  }, [previewCanvas, frames, safeRefIdx, hasColor, chromaMode, chromaColor, chromaSamples, tolerance, smooth, despill, edgeSmooth, edgeTrim, edgeClean, previewMode, solidBgColor])
 
   // 点击参考帧取色
   function pickColor(e) {
@@ -176,7 +185,13 @@ export default function GifToSpriteApp({ onBack }) {
     const sx = Math.round((e.clientX - rect.left) / rect.width * origCanvas.width)
     const sy = Math.round((e.clientY - rect.top) / rect.height * origCanvas.height)
     const px = origCanvas.getContext('2d').getImageData(sx, sy, 1, 1).data
-    update({ chromaColor: rgbToHex(px[0], px[1], px[2]) })
+    const hex = rgbToHex(px[0], px[1], px[2])
+    if ((chromaMode || CHROMA_MODE_CONNECTED) === CHROMA_MODE_CONNECTED) {
+      const nextSamples = [...(chromaSamples || []), { x: sx, y: sy, color: hex }].slice(-5)
+      update({ chromaColor: nextSamples[0]?.color || hex, chromaSamples: nextSamples })
+    } else {
+      update({ chromaColor: hex, chromaSamples: [{ x: sx, y: sy, color: hex }] })
+    }
   }
 
   // ── Step 4: 预览与导出 ────────────────────────────────────────────────────
@@ -243,23 +258,22 @@ export default function GifToSpriteApp({ onBack }) {
 
   useEffect(() => { if (tab === 'sheet') { setPlaying(false); setAnimIdx(0) } }, [tab])
 
+  // ── PNG 压缩开关 ──
+  const [pngCompress, _setPngCompress] = useState(getPngCompressEnabled)
+  function togglePngCompress(v) { _setPngCompress(v); setPngCompressEnabled(v) }
+
   // ── 导出：精灵图 PNG ──
   const [exporting, setExporting] = useState(false)
   async function handleExportPng() {
     if (!sheetCanvas) return
     setExporting(true)
     try {
-      await new Promise((res, rej) => {
-        sheetCanvas.toBlob(blob => {
-          if (!blob) return rej(new Error('toBlob failed'))
-          const a = document.createElement('a')
-          a.href = URL.createObjectURL(blob)
-          a.download = `${baseName(sourceFile?.name || 'gif')}-spritesheet.png`
-          a.click()
-          setTimeout(() => URL.revokeObjectURL(a.href), 60000)
-          res()
-        }, 'image/png')
-      })
+      const blob = await canvasToPngBlob(sheetCanvas, pngCompress)
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `${baseName(sourceFile?.name || 'gif')}-spritesheet.png`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000)
       toast.success(t('g2s.pngDl'))
     } catch (e) {
       toast.error(t('g2s.exportFailed') + e.message)
@@ -270,9 +284,11 @@ export default function GifToSpriteApp({ onBack }) {
 
   // ── 导出：PNG 序列 ZIP（用去背景后的帧）──
   const [exportZip, setExportZip] = useState(false)
+  const [zipProgress, setZipProgress] = useState('')
   async function handleExportZip() {
     if (!processedFrames.length) return
     setExportZip(true)
+    setZipProgress('')
     try {
       const zip = new JSZip()
       const name = baseName(sourceFile?.name || 'gif')
@@ -284,8 +300,12 @@ export default function GifToSpriteApp({ onBack }) {
         src.width = f.imageData.width; src.height = f.imageData.height
         src.getContext('2d').putImageData(f.imageData, 0, 0)
         c.getContext('2d').drawImage(src, 0, 0, outW, outH)
-        const blob = await new Promise(res => c.toBlob(res, 'image/png'))
+        let blob = await new Promise(res => c.toBlob(res, 'image/png'))
         if (!blob) throw new Error(`frame ${i + 1} toBlob failed`)
+        if (pngCompress) {
+          setZipProgress(t('png.compressing').replace('{current}', i + 1).replace('{total}', processedFrames.length))
+          blob = await optimizePng(blob)
+        }
         zip.file(`${name}-frame-${String(i + 1).padStart(3, '0')}.png`, blob)
       }
       const zipBlob = await zip.generateAsync({ type: 'blob' })
@@ -299,6 +319,7 @@ export default function GifToSpriteApp({ onBack }) {
       toast.error(t('g2s.zipFailed') + e.message)
     } finally {
       setExportZip(false)
+      setZipProgress('')
     }
   }
 
@@ -364,7 +385,7 @@ export default function GifToSpriteApp({ onBack }) {
               </div>
               <p className="upload-hint">{t('g2s.formatHint')}</p>
               {decoding && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, color: 'var(--text-dim)', fontSize: '0.85rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, color: 'var(--text-dim)', fontSize: 'var(--text-base)' }}>
                   <i className="ri-loader-4-line" style={{ animation: 'spin 1s linear infinite' }} />
                   {t('g2s.decoding')}
                 </div>
@@ -381,8 +402,8 @@ export default function GifToSpriteApp({ onBack }) {
                 {thumbUrl && <img src={thumbUrl} alt="preview" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />}
               </div>
               <div>
-                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text)' }}>{sourceFile?.name}</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginTop: 4 }}>
+                <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text)' }}>{sourceFile?.name}</div>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', marginTop: 4 }}>
                   {rawFrames.length} {t('common.frames')} · {frameW} × {frameH} px · {state.fps} FPS
                 </div>
                 <button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={handleReset}>
@@ -401,32 +422,32 @@ export default function GifToSpriteApp({ onBack }) {
           {/* 三个输入等宽一行：起始帧 / 结束帧 / 抽帧间隔（窄屏自动换行）*/}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 14 }}>
             <div>
-              <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('g2s.startFrame')}</label>
+              <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('g2s.startFrame')}</label>
               <NumStepper value={frameStart} min={1} max={frameEnd} onChange={v => update({ frameStart: v })} />
             </div>
             <div>
-              <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('g2s.endFrame')}</label>
+              <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('g2s.endFrame')}</label>
               <NumStepper value={frameEnd} min={frameStart} max={rawFrames.length} onChange={v => update({ frameEnd: v })} />
             </div>
             <div>
-              <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('g2s.frameStep')}</label>
+              <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('g2s.frameStep')}</label>
               <NumStepper value={frameStep} min={1} max={rawFrames.length || 1} onChange={v => update({ frameStep: v })} />
             </div>
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 8 }}>{t('g2s.stepHint')}</div>
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', marginTop: 8 }}>{t('g2s.stepHint')}</div>
 
           {/* 抽取结果：整行横条 */}
           <div className="option-card" style={{ padding: '10px 16px', minHeight: 'auto', marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{t('g2s.resultFrames')}</span>
-            <span style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--accent)' }}>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>{t('g2s.resultFrames')}</span>
+            <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--accent)' }}>
               {rawFrames.length} → {frames.length} {t('common.frames')}
             </span>
           </div>
         </Panel>
 
         {/* ── 步骤 3：去背景（可选）── */}
-        <Panel stepNum={3} title={t('g2s.stepChroma')} done={!!chromaColor} locked={!step1Done} defaultOpen={false}
-          metaText={chromaColor ? chromaColor : ''}>
+        <Panel stepNum={3} title={t('g2s.stepChroma')} done={hasColor} locked={!step1Done} defaultOpen={false}
+          metaText={hasColor ? (chromaColor || '') : ''}>
           <p className="step-hint">{t('g2s.chromaHint')}</p>
 
           {frames.length > 1 && (
@@ -446,25 +467,20 @@ export default function GifToSpriteApp({ onBack }) {
             <div>
               <div className="row-between" style={{ marginBottom: 8 }}>
                 <div>
-                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>{t('ref.original')}</span>
-                  <div className="sub-accent">{chromaColor ? t('ref.colorPicked') : t('ref.clickSample')}</div>
-                </div>
-                {chromaColor && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 10px', height: 35,
-                      background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
-                    }}>
-                      <div className="color-dot" style={{ background: chromaColor }} />
-                      <span className="chroma-rgb-text" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text)', fontFamily: 'monospace' }}>
-                        {(() => { const rgb = hexToRgb(chromaColor); return `RGB(${rgb.r}, ${rgb.g}, ${rgb.b})` })()}
-                      </span>
-                    </div>
-                    <button className="btn btn-ghost" onClick={() => update({ chromaColor: null })}>
-                      {t('common.clear')}
-                    </button>
+                  <span style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text)' }}>{t('ref.original')}</span>
+                  <div className="sub-accent">
+                    {hasColor
+                      ? ((chromaMode || CHROMA_MODE_CONNECTED) === CHROMA_MODE_CONNECTED ? t('chroma.connectedPicked') : t('ref.colorPicked'))
+                      : t('ref.clickSample')}
                   </div>
-                )}
+                </div>
+                <ChromaKeyControl
+                  mode={chromaMode}
+                  color={chromaColor}
+                  samples={chromaSamples}
+                  onModeChange={mode => update({ chromaMode: mode, chromaColor: null, chromaSamples: [] })}
+                  onClear={() => update({ chromaColor: null, chromaSamples: [] })}
+                />
               </div>
               <div style={{
                 position: 'relative', borderRadius: 'var(--radius-sm)', overflow: 'hidden',
@@ -473,13 +489,13 @@ export default function GifToSpriteApp({ onBack }) {
               }}>
                 <canvas ref={setOrigCanvas} onClick={pickColor} className="canvas-crosshair"
                   style={{ width: '100%', display: 'block', imageRendering: 'pixelated' }} />
-                {!chromaColor && (
+                {!hasColor && (
                   <div style={{
                     position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                     background: 'rgba(0,0,0,0.35)', pointerEvents: 'none',
                   }}>
                     <div style={{ background: 'rgba(255,255,255,0.92)', borderRadius: 'var(--radius-sm)', padding: '12px 18px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#2d1b00' }}>{t('ref.clickBgColor')}</div>
+                      <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: '#2d1b00' }}>{t('ref.clickBgColor')}</div>
                     </div>
                   </div>
                 )}
@@ -489,7 +505,7 @@ export default function GifToSpriteApp({ onBack }) {
             {/* 右栏：去背景预览 */}
             <div>
               <div className="row-between" style={{ marginBottom: 8 }}>
-                <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>{t('ref.mattePreview')}</span>
+                <span style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text)' }}>{t('ref.mattePreview')}</span>
                 <div className="segmented-control" style={{ height: 35 }}>
                   {[
                     { key: 'result', label: t('ref.modeResult') },
@@ -499,7 +515,7 @@ export default function GifToSpriteApp({ onBack }) {
                     <button key={m.key}
                       className={`segmented-btn ${previewMode === m.key ? 'active' : ''}`}
                       onClick={() => setPreviewMode(m.key)}
-                      style={{ fontSize: '0.75rem', padding: '0 12px' }}
+                      style={{ fontSize: 'var(--text-sm)', padding: '0 12px' }}
                     >
                       {m.label}
                     </button>
@@ -516,26 +532,29 @@ export default function GifToSpriteApp({ onBack }) {
               </div>
               {previewMode === 'solid' && (
                 <div className="solid-color-row">
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{t('ref.checkColor')}</span>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{t('ref.checkColor')}</span>
                   <label className="color-picker-wrap">
                     <div style={{ width: 18, height: 18, background: solidBgColor, border: '1px solid var(--border)' }} />
                     <input type="color" value={solidBgColor} onChange={e => setSolidBgColor(e.target.value)} />
                   </label>
-                  <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'var(--text)' }}>{solidBgColor.toUpperCase()}</span>
+                  <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'monospace', color: 'var(--text)' }}>{solidBgColor.toUpperCase()}</span>
                 </div>
               )}
             </div>
           </div>
 
-          {chromaColor && (
+          {hasColor && (
             <ChromaParams
               tolerance={tolerance} smooth={smooth} despill={despill} edgeSmooth={edgeSmooth}
+              edgeTrim={edgeTrim} edgeClean={edgeClean}
               title={t('chroma.advancedTitle')} hint={t('chroma.advancedHint')}
               onChange={p => {
                 if ('tolerance' in p) update({ tolerance: p.tolerance })
                 if ('smooth' in p) update({ smooth: p.smooth })
                 if ('despill' in p) update({ despill: p.despill })
                 if ('edgeSmooth' in p) update({ edgeSmooth: p.edgeSmooth })
+                if ('edgeTrim' in p) update({ edgeTrim: p.edgeTrim })
+                if ('edgeClean' in p) update({ edgeClean: p.edgeClean })
               }}
             />
           )}
@@ -567,7 +586,7 @@ export default function GifToSpriteApp({ onBack }) {
                       style={{ width: '100%', display: 'block' }} />
                   </div>
                 ) : (
-                  <div style={{ color: 'var(--text-dim)', fontSize: '0.82rem', padding: '60px 0', textAlign: 'center',
+                  <div style={{ color: 'var(--text-dim)', fontSize: 'var(--text-sm)', padding: '60px 0', textAlign: 'center',
                     border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>
                     {t('export.noPreview')}
                   </div>
@@ -585,7 +604,7 @@ export default function GifToSpriteApp({ onBack }) {
                     <canvas ref={setPreviewEl} style={{ width: '100%', display: 'block' }} />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)' }}>
+                    <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text)' }}>
                       {t('export.frame').replace('{current}', (animIdx % frames.length) + 1).replace('{total}', frames.length)}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flex: 1, minWidth: 120 }}>
@@ -617,18 +636,18 @@ export default function GifToSpriteApp({ onBack }) {
               {/* 导出列数 + 间距 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 12 }}>
                 <div>
-                  <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.cols')}</label>
+                  <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.cols')}</label>
                   <NumStepper value={exportCols} min={1} max={8} onChange={v => update({ exportCols: v })} />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.gap')}</label>
+                  <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.gap')}</label>
                   <NumStepper value={exportGap} min={0} max={48} onChange={v => update({ exportGap: v })} />
                 </div>
               </div>
 
               {/* 单帧尺寸预设 */}
               <div style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.sizePreset')}</label>
+                <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>{t('export.sizePreset')}</label>
                 <div style={{ position: 'relative' }}>
                   <select value={exportSizePreset}
                     onChange={e => update({ exportSizePreset: e.target.value })}
@@ -655,17 +674,20 @@ export default function GifToSpriteApp({ onBack }) {
 
               {/* 预估导出尺寸 */}
               <div className="option-card" style={{ padding: '10px 14px', minHeight: 'auto', marginBottom: 14 }}>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{t('export.estimatedSize')}</div>
-                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--accent)', margin: '2px 0' }}>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{t('export.estimatedSize')}</div>
+                <div style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: 'var(--accent)', margin: '2px 0' }}>
                   {sheetW > 0 ? `${sheetW} × ${sheetH}` : '—'}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
                   {t('sprite.sheetInfo').replace('{cols}', exportCols).replace('{rows}', exportRows).replace('{w}', outW).replace('{h}', outH)}
                 </div>
                 {(sheetW > 8192 || sheetH > 8192) && (
-                  <div style={{ fontSize: '0.72rem', color: 'var(--warning)', marginTop: 4 }}>{t('export.sizeTooLarge')}</div>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--warning)', marginTop: 4 }}>{t('export.sizeTooLarge')}</div>
                 )}
               </div>
+
+              {/* PNG 压缩开关 */}
+              <PngCompressToggle checked={pngCompress} onChange={togglePngCompress} style={{ marginTop: 14, marginBottom: 14 }} />
 
               {/* 导出按钮 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -674,14 +696,14 @@ export default function GifToSpriteApp({ onBack }) {
                   onClick={handleExportPng}
                   disabled={exporting || !sheetCanvas}
                 >
-                  {exporting ? t('common.exporting') : t('g2s.dlPng')}
+                  {exporting ? (pngCompress ? t('png.loadingEngine') : t('common.exporting')) : t('g2s.dlPng')}
                 </button>
                 <button
                   className="btn btn-primary"
                   onClick={handleExportZip}
                   disabled={exportZip || !frames.length}
                 >
-                  {exportZip ? t('common.exporting') : t('g2s.dlZip')}
+                  {exportZip ? (zipProgress || t('common.exporting')) : t('g2s.dlZip')}
                 </button>
               </div>
             </div>

@@ -24,6 +24,8 @@ export default function StepUpload({ stepNum, done, state, update }) {
       videoHeight: 0,
       cropRect: null,
       refFrame: null,
+      chromaColor: null,
+      chromaSamples: [],
       frames: [],
       sheetCanvas: null,
       sheetAlphaCanvas: null,
@@ -98,7 +100,7 @@ export default function StepUpload({ stepNum, done, state, update }) {
               style={{ marginTop: 10 }}
               onClick={() => {
                 URL.revokeObjectURL(state.videoUrl)
-                update({ videoFile: null, videoUrl: null, cropRect: null, refFrame: null, frames: [], sheetCanvas: null, sheetAlphaCanvas: null })
+                update({ videoFile: null, videoUrl: null, cropRect: null, refFrame: null, chromaColor: null, chromaSamples: [], frames: [], sheetCanvas: null, sheetAlphaCanvas: null })
               }}
             >
               {t('common.reselect')}

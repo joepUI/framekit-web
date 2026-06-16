@@ -1,7 +1,7 @@
 {
   "name": "video-timesheet",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@jsquash/oxipng": "^2.3.0",
     "jszip": "^3.10.1",
     "pica": "^9.0.1",
     "react": "^18.3.1",

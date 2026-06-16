@@ -157,15 +157,15 @@ export default function StepSegment({ stepNum, done, locked, state, update }) {
         }}>
           <div className="option-card option-card--metric">
             <label>{t('extract.start')}</label>
-            <div className="metric-value" style={{ fontSize: '0.95rem' }}>{fmtTime(start)}</div>
+            <div className="metric-value" style={{ fontSize: 'var(--text-base)' }}>{fmtTime(start)}</div>
           </div>
           <div className="option-card option-card--metric">
             <label>{t('extract.end')}</label>
-            <div className="metric-value" style={{ fontSize: '0.95rem' }}>{fmtTime(end)}</div>
+            <div className="metric-value" style={{ fontSize: 'var(--text-base)' }}>{fmtTime(end)}</div>
           </div>
           <div className="option-card option-card--metric">
             <label>{t('extract.segLength')}</label>
-            <div className="metric-value" style={{ fontSize: '0.95rem' }}>{fmtTime(segLen)}</div>
+            <div className="metric-value" style={{ fontSize: 'var(--text-base)' }}>{fmtTime(segLen)}</div>
           </div>
         </div>
       </div>

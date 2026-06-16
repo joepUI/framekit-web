@@ -27,15 +27,15 @@ export default class ErrorBoundary extends Component {
           maxWidth: 480, margin: '80px auto', padding: '0 24px', textAlign: 'center',
         }}>
           <div style={{ fontSize: '2.5rem', marginBottom: 16 }}>😵</div>
-          <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>
+          <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>
             页面出了点问题
           </h2>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.6 }}>
+          <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.6 }}>
             渲染时发生了意外错误，请尝试刷新页面或返回首页。
           </p>
           {msg && (
             <pre style={{
-              fontSize: '0.72rem', color: 'var(--error)', background: 'var(--error-soft)',
+              fontSize: 'var(--text-sm)', color: 'var(--error)', background: 'var(--error-soft)',
               border: '1px solid rgba(208,64,64,0.15)', padding: '10px 14px',
               textAlign: 'left', overflowX: 'auto', marginBottom: 24,
               whiteSpace: 'pre-wrap', wordBreak: 'break-all',

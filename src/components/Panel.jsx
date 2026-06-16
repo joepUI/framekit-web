@@ -48,7 +48,7 @@ export default function Panel({ stepNum, title, done, locked, defaultOpen = fals
         </span>
         <span className="panel-title">{title}</span>
         {metaText && <span className="panel-meta">{metaText}</span>}
-        {locked && <span className="panel-meta" style={{ color: 'var(--text-dim)', fontSize: '0.72rem' }}><i className="ri-lock-line" style={{ marginRight: 3 }} /> {t('common.completeFirst')}</span>}
+        {locked && <span className="panel-meta" style={{ color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}><i className="ri-lock-line" style={{ marginRight: 3 }} /> {t('common.completeFirst')}</span>}
         {canOpen && (
           <span className={`panel-chevron ${open ? 'open' : ''}`}><i className="ri-arrow-down-s-line" /></span>
         )}

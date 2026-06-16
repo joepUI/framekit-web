@@ -7,6 +7,8 @@ import UPNG from 'upng-js'
 import { baseName } from '../utils/format.js'
 import { useToast } from './Toast.jsx'
 import { useI18n } from '../i18n/index.jsx'
+import { canvasToPngBlob, optimizePng, getPngCompressEnabled, setPngCompressEnabled } from '../utils/pngOptimize.js'
+import PngCompressToggle from './PngCompressToggle.jsx'
 
 export default function SpritePreviewExportStep({ stepNum, locked, state, update }) {
   const { t } = useI18n()
@@ -73,22 +75,21 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
     return () => cancelAnimationFrame(animRef.current)
   }, [playing, previewFps, frames.length])
 
+  // ── PNG 压缩开关 ──
+  const [pngCompress, _setPngCompress] = useState(getPngCompressEnabled)
+  function togglePngCompress(v) { _setPngCompress(v); setPngCompressEnabled(v) }
+
   // ── 导出精灵图 PNG ──
   async function handleExportPng() {
     if (!sheetCanvas) return
     setExporting(true)
     try {
-      await new Promise((res, rej) => {
-        sheetCanvas.toBlob(blob => {
-          if (!blob) return rej(new Error('导出失败'))
-          const a = document.createElement('a')
-          a.href = URL.createObjectURL(blob)
-          a.download = `${baseName(sourceFile?.name || 'sprite')}-edited.png`
-          a.click()
-          setTimeout(() => URL.revokeObjectURL(a.href), 60000)
-          res()
-        }, 'image/png')
-      })
+      const blob = await canvasToPngBlob(sheetCanvas, pngCompress)
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `${baseName(sourceFile?.name || 'sprite')}-edited.png`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000)
       toast.success(t('sprite.pngDl'))
     } catch (e) {
       toast.error(t('sprite.exportFailed') + e.message)
@@ -128,9 +129,11 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
   }
 
   // ── 导出单帧 ZIP ──
+  const [zipProgress, setZipProgress] = useState('')
   async function handleExportZip() {
     if (!frames.length) return
     setExportZip(true)
+    setZipProgress('')
     try {
       const zip = new JSZip()
       const name = baseName(sourceFile?.name || 'sprite')
@@ -142,8 +145,12 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
         src.width = f.imageData.width; src.height = f.imageData.height
         src.getContext('2d').putImageData(f.imageData, 0, 0)
         c.getContext('2d').drawImage(src, 0, 0, outW, outH)
-        const blob = await new Promise(res => c.toBlob(res, 'image/png'))
+        let blob = await new Promise(res => c.toBlob(res, 'image/png'))
         if (!blob) throw new Error(`frame ${i + 1} toBlob failed`)
+        if (pngCompress) {
+          setZipProgress(t('png.compressing').replace('{current}', i + 1).replace('{total}', frames.length))
+          blob = await optimizePng(blob)
+        }
         zip.file(`${name}-frame-${String(i + 1).padStart(3, '0')}.png`, blob)
       }
       const zipBlob = await zip.generateAsync({ type: 'blob' })
@@ -157,6 +164,7 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
       toast.error(t('sprite.zipFailed') + e.message)
     } finally {
       setExportZip(false)
+      setZipProgress('')
     }
   }
 
@@ -285,6 +293,9 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
             </div>
           </div>
 
+          {/* PNG 压缩开关（父级 flex gap 控制间距，不传 margin） */}
+          <PngCompressToggle checked={pngCompress} onChange={togglePngCompress} />
+
           {/* 导出按钮 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <button
@@ -292,7 +303,7 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
               onClick={handleExportPng}
               disabled={exporting || !sheetCanvas}
             >
-              {exporting ? t('common.exporting') : t('sprite.dlPng')}
+              {exporting ? (pngCompress ? t('png.loadingEngine') : t('common.exporting')) : t('sprite.dlPng')}
             </button>
             <button
               className="btn btn-primary"
@@ -306,7 +317,7 @@ export default function SpritePreviewExportStep({ stepNum, locked, state, update
               onClick={handleExportZip}
               disabled={exportZip || !frames.length}
             >
-              {exportZip ? t('common.exporting') : t('sprite.dlZip')}
+              {exportZip ? (zipProgress || t('common.exporting')) : t('sprite.dlZip')}
             </button>
             <button
               className="btn btn-primary"
